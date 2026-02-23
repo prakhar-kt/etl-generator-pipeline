@@ -1,0 +1,11 @@
+.env
+examples/requirements/
+examples/generated_sql/
+__pycache__/
+*.pyc
+.venv/
+output/
+.DS_Store
+mapping_generator/actual_requirements/csv/
+mapping_generator/actual_requirements/pdf/
+mapping_generator/actual_output/

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart DTC Mapping Generator</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; min-height: 100vh; }
+    .header { background: #1a1a2e; color: #fff; padding: 1.5rem 2rem; }
+    .header h1 { font-size: 1.4rem; font-weight: 600; }
+    .header p { font-size: 0.85rem; color: #a0a0c0; margin-top: 0.3rem; }
+    .container { max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; }
+    .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem; }
+    .card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: #1a1a2e; }
+    .form-group { margin-bottom: 1rem; }
+    label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem; color: #555; }
+    .file-input-wrapper { position: relative; border: 2px dashed #d0d5dd; border-radius: 6px; padding: 1.2rem; text-align: center; cursor: pointer; transition: border-color 0.2s; }
+    .file-input-wrapper:hover { border-color: #4a6cf7; }
+    .file-input-wrapper.has-file { border-color: #22c55e; background: #f0fdf4; }
+    .file-input-wrapper input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .file-input-wrapper .label { font-size: 0.9rem; color: #888; }
+    .file-input-wrapper.has-file .label { color: #22c55e; font-weight: 600; }
+    .row { display: flex; gap: 1rem; }
+    .row > * { flex: 1; }
+    select, input[type="text"] { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d0d5dd; border-radius: 6px; font-size: 0.9rem; }
+    select:focus, input[type="text"]:focus { outline: none; border-color: #4a6cf7; box-shadow: 0 0 0 2px rgba(74,108,247,0.15); }
+    .btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.7rem 1.5rem; border: none; border-radius: 6px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .btn-primary { background: #4a6cf7; color: #fff; width: 100%; justify-content: center; }
+    .btn-primary:hover { background: #3b5de7; }
+    .btn-primary:disabled { background: #a0b4f7; cursor: not-allowed; }
+    .btn-download { background: #22c55e; color: #fff; padding: 0.4rem 1rem; font-size: 0.8rem; }
+    .btn-download:hover { background: #16a34a; }
+    .spinner { display: none; width: 18px; height: 18px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error-box { background: #fef2f2; border: 1px solid #fca5a5; color: #dc2626; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1rem; font-size: 0.85rem; }
+    .warning-box { background: #fffbeb; border: 1px solid #fcd34d; color: #b45309; border-radius: 6px; padding: 0.5rem 0.8rem; margin-top: 0.5rem; font-size: 0.8rem; }
+    .result-file { margin-bottom: 1.5rem; }
+    .result-file-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .result-file-header h3 { font-size: 0.95rem; color: #1a1a2e; }
+    .yaml-content { background: #1e1e2e; color: #cdd6f4; padding: 1rem; border-radius: 6px; overflow-x: auto; max-height: 400px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; line-height: 1.5; white-space: pre; }
+    #results { display: none; }
+    .hint { font-size: 0.75rem; color: #999; margin-top: 0.25rem; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Smart DTC Mapping Generator</h1>
+    <p>Upload requirements to generate YAML mapping files</p>
+  </div>
+
+  <div class="container">
+    <form id="genForm" class="card">
+      <h2>Upload Requirements</h2>
+
+      <div class="row">
+        <div class="form-group">
+          <label>Requirements File (CSV / Excel)</label>
+          <div class="file-input-wrapper" id="csvDrop">
+            <input type="file" id="csvFile" accept=".csv,.xlsx,.xls">
+            <div class="label" id="csvLabel">Click or drag to upload CSV/Excel</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>PDF Business Rules (optional)</label>
+          <div class="file-input-wrapper" id="pdfDrop">
+            <input type="file" id="pdfFile" accept=".pdf">
+            <div class="label" id="pdfLabel">Click or drag to upload PDF</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>Layer</label>
+          <select id="layer">
+            <option value="">Auto-detect</option>
+            <option value="CDL">CDL</option>
+            <option value="Cleansed_RAW">Cleansed_RAW</option>
+            <option value="BL">BL</option>
+            <option value="BR">BR</option>
+          </select>
+          <div class="hint">Leave as auto-detect to infer from file content</div>
+        </div>
+        <div class="form-group">
+          <label>Source Name</label>
+          <input type="text" id="source" placeholder="e.g. PRP1, ANAPLAN, Various">
+          <div class="hint">Optional — auto-detected from input if left blank</div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary" id="submitBtn">
+        <span id="btnText">Generate YAML</span>
+        <div class="spinner" id="spinner"></div>
+      </button>
+    </form>
+
+    <div id="errorBox" class="error-box" style="display:none;"></div>
+
+    <div id="results" class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+        <h2>Generated Files</h2>
+        <button class="btn btn-download" id="downloadAllBtn">Download All</button>
+      </div>
+      <div id="fileList"></div>
+    </div>
+  </div>
+
+  <script>
+    // File input display
+    function setupFileInput(inputId, labelId, wrapperId) {
+      const input = document.getElementById(inputId);
+      const label = document.getElementById(labelId);
+      const wrapper = document.getElementById(wrapperId);
+      input.addEventListener('change', () => {
+        if (input.files.length > 0) {
+          label.textContent = input.files[0].name;
+          wrapper.classList.add('has-file');
+        } else {
+          label.textContent = inputId === 'csvFile' ? 'Click or drag to upload CSV/Excel' : 'Click or drag to upload PDF';
+          wrapper.classList.remove('has-file');
+        }
+      });
+    }
+    setupFileInput('csvFile', 'csvLabel', 'csvDrop');
+    setupFileInput('pdfFile', 'pdfLabel', 'pdfDrop');
+
+    // Store generated files for download
+    let generatedFiles = [];
+
+    // Form submission
+    document.getElementById('genForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const csvFile = document.getElementById('csvFile').files[0];
+      const pdfFile = document.getElementById('pdfFile').files[0];
+      const layer = document.getElementById('layer').value;
+      const source = document.getElementById('source').value;
+
+      if (!csvFile && !pdfFile) {
+        showError('Please upload at least one file.');
+        return;
+      }
+
+      const formData = new FormData();
+      if (csvFile) formData.append('csv_file', csvFile);
+      if (pdfFile) formData.append('pdf_file', pdfFile);
+      formData.append('layer', layer);
+      formData.append('source', source);
+
+      setLoading(true);
+      hideError();
+      document.getElementById('results').style.display = 'none';
+
+      try {
+        const resp = await fetch('/generate', { method: 'POST', body: formData });
+        const data = await resp.json();
+
+        if (data.errors && data.errors.length > 0) {
+          showError(data.errors.join('<br>'));
+          return;
+        }
+
+        generatedFiles = data.files;
+        renderFiles(data.files);
+      } catch (err) {
+        showError('Request failed: ' + err.message);
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    function renderFiles(files) {
+      const list = document.getElementById('fileList');
+      list.innerHTML = '';
+
+      files.forEach((file, i) => {
+        const div = document.createElement('div');
+        div.className = 'result-file';
+
+        let warningsHtml = '';
+        if (file.warnings && file.warnings.length > 0) {
+          warningsHtml = '<div class="warning-box">Warnings: ' + file.warnings.join('; ') + '</div>';
+        }
+        if (file.validation_errors && file.validation_errors.length > 0) {
+          warningsHtml += '<div class="error-box" style="margin-top:0.5rem;font-size:0.8rem;">Validation errors: ' + file.validation_errors.join('; ') + '</div>';
+        }
+
+        div.innerHTML = `
+          <div class="result-file-header">
+            <h3>${file.filename}</h3>
+            <button class="btn btn-download" onclick="downloadFile(${i})">Download</button>
+          </div>
+          <div class="yaml-content">${escapeHtml(file.content)}</div>
+          ${warningsHtml}
+        `;
+        list.appendChild(div);
+      });
+
+      document.getElementById('results').style.display = 'block';
+    }
+
+    function downloadFile(index) {
+      const file = generatedFiles[index];
+      const blob = new Blob([file.content], { type: 'application/x-yaml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    document.getElementById('downloadAllBtn').addEventListener('click', () => {
+      generatedFiles.forEach((_, i) => downloadFile(i));
+    });
+
+    function setLoading(loading) {
+      const btn = document.getElementById('submitBtn');
+      const text = document.getElementById('btnText');
+      const spinner = document.getElementById('spinner');
+      btn.disabled = loading;
+      text.textContent = loading ? 'Generating...' : 'Generate YAML';
+      spinner.style.display = loading ? 'block' : 'none';
+    }
+
+    function showError(msg) {
+      const box = document.getElementById('errorBox');
+      box.innerHTML = msg;
+      box.style.display = 'block';
+    }
+
+    function hideError() {
+      document.getElementById('errorBox').style.display = 'none';
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
