@@ -1,8 +1,10 @@
 """FastAPI web application for the Smart DTC Mapping Generator."""
 
+import os
 import tempfile
 from pathlib import Path
 
+import yaml
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,9 +18,121 @@ app = FastAPI(title="Smart DTC Mapping Generator")
 STATIC_DIR = Path(__file__).parent / "static"
 
 
+def _get_bq_client():
+    """Get BigQuery client if available."""
+    try:
+        from google.cloud import bigquery
+        project = os.environ.get("GCP_PROJECT_ID")
+        return bigquery.Client(project=project) if project else bigquery.Client()
+    except Exception:
+        return None
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return (STATIC_DIR / "index.html").read_text()
+
+
+@app.get("/bq-status")
+async def bq_status():
+    """Check if BigQuery is available."""
+    client = _get_bq_client()
+    if client:
+        return {"available": True, "project": client.project}
+    return {"available": False, "project": None}
+
+
+@app.post("/execute-bl")
+async def execute_bl(
+    yaml_content: str = Form(""),
+    project_id: str = Form(""),
+):
+    """Execute BL SQL (CREATE TABLE + MERGE/INSERT) against BigQuery."""
+    client = _get_bq_client()
+    if not client:
+        return JSONResponse(
+            status_code=400,
+            content={"errors": ["BigQuery not available. Set GCP_PROJECT_ID and ensure google-cloud-bigquery is installed."]},
+        )
+
+    if not yaml_content:
+        return JSONResponse(
+            status_code=400,
+            content={"errors": ["No YAML content provided."]},
+        )
+
+    # Override project if provided
+    if project_id:
+        from google.cloud import bigquery
+        client = bigquery.Client(project=project_id)
+
+    try:
+        mapping = yaml.safe_load(yaml_content)
+    except yaml.YAMLError as e:
+        return JSONResponse(
+            status_code=400,
+            content={"errors": [f"Invalid YAML: {e}"]},
+        )
+
+    results = []
+    errors = []
+
+    # Replace Jinja2 placeholders with actual project
+    def replace_placeholders(sql: str) -> str:
+        project = client.project
+        sql = sql.replace("{{ target_project }}", project)
+        sql = sql.replace("{{ source_projects[0] }}", project)
+        sql = sql.replace("{{ source_projects[1] }}", project)
+        sql = sql.replace("{{ source_projects[2] }}", project)
+        sql = sql.replace("{{ process_id }}", "web-ui-exec")
+        return sql
+
+    # Step 1: Execute CREATE TABLE
+    create_sql = mapping.get("create_table", "")
+    if create_sql:
+        create_sql = replace_placeholders(create_sql)
+        try:
+            job = client.query(create_sql)
+            job.result()
+            results.append({"step": "create_table", "status": "success", "message": "Table created/verified"})
+        except Exception as e:
+            errors.append(f"CREATE TABLE failed: {e}")
+            results.append({"step": "create_table", "status": "error", "message": str(e)})
+
+    # Step 2: Execute MERGE or other_statement
+    merge_sql = mapping.get("merge_statement", "") or mapping.get("other_statement", "")
+    if merge_sql:
+        merge_sql = replace_placeholders(merge_sql)
+
+        # Replace get_max_date inline if referenced
+        max_date_sql = mapping.get("get_max_date", "")
+        if max_date_sql:
+            max_date_sql = replace_placeholders(max_date_sql).rstrip(";").strip()
+
+        try:
+            job = client.query(merge_sql)
+            job.result()
+            affected = job.num_dml_affected_rows
+            msg = f"SQL executed successfully"
+            if affected is not None:
+                msg += f" ({affected:,} rows affected)"
+            results.append({"step": "merge/insert", "status": "success", "message": msg})
+        except Exception as e:
+            errors.append(f"MERGE/INSERT failed: {e}")
+            results.append({"step": "merge/insert", "status": "error", "message": str(e)})
+
+    # Step 3: Get row count
+    target_table = mapping.get("metadata", {}).get("target_table_name", "")
+    if target_table and not errors:
+        try:
+            count_sql = f"SELECT COUNT(*) as cnt FROM `{client.project}.Business_Logic.{target_table}`"
+            job = client.query(count_sql)
+            row = list(job.result())[0]
+            results.append({"step": "verify", "status": "success", "message": f"Table has {row.cnt:,} rows"})
+        except Exception:
+            pass  # Non-critical
+
+    return {"results": results, "errors": errors}
 
 
 @app.post("/generate")

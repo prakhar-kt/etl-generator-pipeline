@@ -31,6 +31,18 @@
     .btn-primary:disabled { background: #a0b4f7; cursor: not-allowed; }
     .btn-download { background: #22c55e; color: #fff; padding: 0.4rem 1rem; font-size: 0.8rem; }
     .btn-download:hover { background: #16a34a; }
+    .btn-execute { background: #6366f1; color: #fff; padding: 0.4rem 1rem; font-size: 0.8rem; }
+    .btn-execute:hover { background: #4f46e5; }
+    .btn-execute:disabled { background: #a5b4fc; cursor: not-allowed; }
+    .success-box { background: #f0fdf4; border: 1px solid #86efac; color: #166534; border-radius: 6px; padding: 0.5rem 0.8rem; margin-top: 0.5rem; font-size: 0.8rem; }
+    .exec-results { margin-top: 0.8rem; }
+    .exec-step { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; font-size: 0.82rem; }
+    .exec-step .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .exec-step .dot.success { background: #22c55e; }
+    .exec-step .dot.error { background: #ef4444; }
+    .bq-status { font-size: 0.75rem; padding: 0.3rem 0.6rem; border-radius: 4px; margin-left: auto; }
+    .bq-status.connected { background: #f0fdf4; color: #166534; }
+    .bq-status.disconnected { background: #fef2f2; color: #991b1b; }
     .spinner { display: none; width: 18px; height: 18px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .error-box { background: #fef2f2; border: 1px solid #fca5a5; color: #dc2626; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1rem; font-size: 0.85rem; }
@@ -100,7 +112,11 @@
     <div id="results" class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
         <h2>Generated Files</h2>
-        <button class="btn btn-download" id="downloadAllBtn">Download All</button>
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+          <span id="bqStatus" class="bq-status"></span>
+          <button class="btn btn-execute" id="executeAllBtn" style="display:none;">Execute on BigQuery</button>
+          <button class="btn btn-download" id="downloadAllBtn">Download All</button>
+        </div>
       </div>
       <div id="fileList"></div>
     </div>
@@ -127,6 +143,29 @@
 
     // Store generated files for download
     let generatedFiles = [];
+    let bqAvailable = false;
+    let bqProject = '';
+
+    // Check BigQuery status on load
+    async function checkBqStatus() {
+      try {
+        const resp = await fetch('/bq-status');
+        const data = await resp.json();
+        const el = document.getElementById('bqStatus');
+        if (data.available) {
+          bqAvailable = true;
+          bqProject = data.project;
+          el.textContent = 'BQ: ' + data.project;
+          el.className = 'bq-status connected';
+        } else {
+          el.textContent = 'BQ: not connected';
+          el.className = 'bq-status disconnected';
+        }
+      } catch(e) {
+        // ignore
+      }
+    }
+    checkBqStatus();
 
     // Form submission
     document.getElementById('genForm').addEventListener('submit', async (e) => {
@@ -172,6 +211,12 @@
     function renderFiles(files) {
       const list = document.getElementById('fileList');
       list.innerHTML = '';
+      const layer = document.getElementById('layer').value;
+      const isBL = layer === 'BL' || layer === 'BR';
+
+      // Show execute all button for BL/BR layers when BQ is available
+      const execAllBtn = document.getElementById('executeAllBtn');
+      execAllBtn.style.display = (isBL && bqAvailable) ? 'inline-flex' : 'none';
 
       files.forEach((file, i) => {
         const div = document.createElement('div');
@@ -185,19 +230,75 @@
           warningsHtml += '<div class="error-box" style="margin-top:0.5rem;font-size:0.8rem;">Validation errors: ' + file.validation_errors.join('; ') + '</div>';
         }
 
+        const execBtn = (isBL && bqAvailable)
+          ? `<button class="btn btn-execute" onclick="executeFile(${i})" id="execBtn${i}">Execute</button>`
+          : '';
+
         div.innerHTML = `
           <div class="result-file-header">
             <h3>${file.filename}</h3>
-            <button class="btn btn-download" onclick="downloadFile(${i})">Download</button>
+            <div style="display:flex;gap:0.5rem;">
+              ${execBtn}
+              <button class="btn btn-download" onclick="downloadFile(${i})">Download</button>
+            </div>
           </div>
           <div class="yaml-content">${escapeHtml(file.content)}</div>
           ${warningsHtml}
+          <div id="execResults${i}" class="exec-results"></div>
         `;
         list.appendChild(div);
       });
 
       document.getElementById('results').style.display = 'block';
     }
+
+    async function executeFile(index) {
+      const file = generatedFiles[index];
+      const btn = document.getElementById('execBtn' + index);
+      const resultsDiv = document.getElementById('execResults' + index);
+
+      btn.disabled = true;
+      btn.textContent = 'Executing...';
+      resultsDiv.innerHTML = '';
+
+      try {
+        const formData = new FormData();
+        formData.append('yaml_content', file.content);
+        formData.append('project_id', bqProject);
+
+        const resp = await fetch('/execute-bl', { method: 'POST', body: formData });
+        const data = await resp.json();
+
+        if (data.errors && data.errors.length > 0) {
+          resultsDiv.innerHTML = '<div class="error-box" style="font-size:0.8rem;">' + data.errors.join('<br>') + '</div>';
+        }
+
+        if (data.results) {
+          let html = '';
+          data.results.forEach(r => {
+            const dotClass = r.status === 'success' ? 'success' : 'error';
+            html += `<div class="exec-step"><span class="dot ${dotClass}"></span><strong>${r.step}:</strong> ${escapeHtml(r.message)}</div>`;
+          });
+          resultsDiv.innerHTML += html;
+        }
+
+        const allSuccess = data.results && data.results.every(r => r.status === 'success');
+        if (allSuccess) {
+          resultsDiv.innerHTML = '<div class="success-box">Successfully executed against BigQuery</div>' + resultsDiv.innerHTML;
+        }
+      } catch (err) {
+        resultsDiv.innerHTML = '<div class="error-box" style="font-size:0.8rem;">Execution failed: ' + err.message + '</div>';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Execute';
+      }
+    }
+
+    document.getElementById('executeAllBtn').addEventListener('click', async () => {
+      for (let i = 0; i < generatedFiles.length; i++) {
+        await executeFile(i);
+      }
+    });
 
     function downloadFile(index) {
       const file = generatedFiles[index];

@@ -1,0 +1,148 @@
+-- ============================================================
+-- NovaStar Brands Corp - Data Preview Queries
+-- Run against project: m-mapping-gen-2026
+-- ============================================================
+
+-- ════════════════════════════════════════════════════════════
+-- RAW LAYER (Src_NovaStar)
+-- ════════════════════════════════════════════════════════════
+
+-- Companies
+SELECT * FROM `m-mapping-gen-2026.Src_NovaStar.raw_company` LIMIT 10;
+
+-- Customers
+SELECT * FROM `m-mapping-gen-2026.Src_NovaStar.raw_customer` LIMIT 10;
+
+-- Products
+SELECT * FROM `m-mapping-gen-2026.Src_NovaStar.raw_product` LIMIT 10;
+
+-- Prices
+SELECT * FROM `m-mapping-gen-2026.Src_NovaStar.raw_price` LIMIT 10;
+
+-- Costs
+SELECT * FROM `m-mapping-gen-2026.Src_NovaStar.raw_cost` LIMIT 10;
+
+-- Order Lines (sample)
+SELECT * FROM `m-mapping-gen-2026.Src_NovaStar.raw_order_line` LIMIT 10;
+
+-- Returns
+SELECT * FROM `m-mapping-gen-2026.Src_NovaStar.raw_return` LIMIT 10;
+
+-- Demand Forecasts
+SELECT * FROM `m-mapping-gen-2026.Src_NovaStar.raw_demand_forecast` LIMIT 10;
+
+-- Sales Forecasts
+SELECT * FROM `m-mapping-gen-2026.Src_NovaStar.raw_sales_forecast` LIMIT 10;
+
+-- RAW row counts
+SELECT 'raw_company' AS table_name, COUNT(*) AS row_count FROM `m-mapping-gen-2026.Src_NovaStar.raw_company`
+UNION ALL SELECT 'raw_customer', COUNT(*) FROM `m-mapping-gen-2026.Src_NovaStar.raw_customer`
+UNION ALL SELECT 'raw_product', COUNT(*) FROM `m-mapping-gen-2026.Src_NovaStar.raw_product`
+UNION ALL SELECT 'raw_price', COUNT(*) FROM `m-mapping-gen-2026.Src_NovaStar.raw_price`
+UNION ALL SELECT 'raw_cost', COUNT(*) FROM `m-mapping-gen-2026.Src_NovaStar.raw_cost`
+UNION ALL SELECT 'raw_order_line', COUNT(*) FROM `m-mapping-gen-2026.Src_NovaStar.raw_order_line`
+UNION ALL SELECT 'raw_return', COUNT(*) FROM `m-mapping-gen-2026.Src_NovaStar.raw_return`
+UNION ALL SELECT 'raw_demand_forecast', COUNT(*) FROM `m-mapping-gen-2026.Src_NovaStar.raw_demand_forecast`
+UNION ALL SELECT 'raw_sales_forecast', COUNT(*) FROM `m-mapping-gen-2026.Src_NovaStar.raw_sales_forecast`
+ORDER BY table_name;
+
+
+-- ════════════════════════════════════════════════════════════
+-- CDL LAYER (CDL_NovaStar)
+-- ════════════════════════════════════════════════════════════
+
+-- Dimension: Company
+SELECT * FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_company` LIMIT 10;
+
+-- Dimension: Customer
+SELECT * FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_customer` LIMIT 10;
+
+-- Dimension: Product
+SELECT * FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_product` LIMIT 10;
+
+-- Dimension: Selling Method
+SELECT * FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_selling_method` LIMIT 10;
+
+-- Dimension: Calendar
+SELECT * FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_calendar` LIMIT 10;
+
+-- Fact: Sales
+SELECT * FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_sales` LIMIT 10;
+
+-- Fact: Returns
+SELECT * FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_returns` LIMIT 10;
+
+-- Fact: Product Price
+SELECT * FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_product_price` LIMIT 10;
+
+-- Fact: Product Cost
+SELECT * FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_product_cost` LIMIT 10;
+
+-- Fact: Demand Forecast
+SELECT * FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_demand_forecast` LIMIT 10;
+
+-- Fact: Sales Forecast
+SELECT * FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_sales_forecast` LIMIT 10;
+
+-- CDL row counts
+SELECT 'cdl_dim_company' AS table_name, COUNT(*) AS row_count FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_company`
+UNION ALL SELECT 'cdl_dim_customer', COUNT(*) FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_customer`
+UNION ALL SELECT 'cdl_dim_product', COUNT(*) FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_product`
+UNION ALL SELECT 'cdl_dim_selling_method', COUNT(*) FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_selling_method`
+UNION ALL SELECT 'cdl_dim_calendar', COUNT(*) FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_calendar`
+UNION ALL SELECT 'cdl_fact_sales', COUNT(*) FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_sales`
+UNION ALL SELECT 'cdl_fact_returns', COUNT(*) FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_returns`
+UNION ALL SELECT 'cdl_fact_product_price', COUNT(*) FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_product_price`
+UNION ALL SELECT 'cdl_fact_product_cost', COUNT(*) FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_product_cost`
+UNION ALL SELECT 'cdl_fact_demand_forecast', COUNT(*) FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_demand_forecast`
+UNION ALL SELECT 'cdl_fact_sales_forecast', COUNT(*) FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_sales_forecast`
+ORDER BY table_name;
+
+
+-- ════════════════════════════════════════════════════════════
+-- USEFUL ANALYTICS PREVIEWS
+-- ════════════════════════════════════════════════════════════
+
+-- Sales by company
+SELECT c.COMPANY_CODE, c.COMPANY_NAME, c.REGION,
+       COUNT(*) AS order_lines, SUM(s.ORDER_QTY) AS total_qty, SUM(s.ORDER_VALUE) AS total_value
+FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_sales` s
+JOIN `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_company` c ON s.KEY_COMPANY = c.KEY_COMPANY
+GROUP BY c.COMPANY_CODE, c.COMPANY_NAME, c.REGION
+ORDER BY total_value DESC;
+
+-- Sales by product category and brand
+SELECT p.CATEGORY, p.BRAND, COUNT(*) AS order_lines,
+       SUM(s.ORDER_QTY) AS total_qty, SUM(s.ORDER_VALUE) AS total_value
+FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_sales` s
+JOIN `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_product` p ON s.KEY_PRODUCT = p.KEY_PRODUCT
+GROUP BY p.CATEGORY, p.BRAND
+ORDER BY total_value DESC;
+
+-- Sales by selling method
+SELECT sm.SELLING_METHOD_CODE, sm.SELLING_METHOD_NAME,
+       COUNT(*) AS order_lines, SUM(s.ORDER_QTY) AS total_qty, SUM(s.ORDER_VALUE) AS total_value
+FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_sales` s
+JOIN `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_selling_method` sm ON s.KEY_SELLING_METHOD = sm.KEY_SELLING_METHOD
+GROUP BY sm.SELLING_METHOD_CODE, sm.SELLING_METHOD_NAME
+ORDER BY total_value DESC;
+
+-- Monthly sales trend
+SELECT EXTRACT(YEAR FROM s.TRANSACTION_DATE) AS year,
+       EXTRACT(MONTH FROM s.TRANSACTION_DATE) AS month,
+       COUNT(*) AS order_lines, SUM(s.ORDER_QTY) AS total_qty, SUM(s.ORDER_VALUE) AS total_value
+FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_sales` s
+GROUP BY year, month
+ORDER BY year, month;
+
+-- Top 10 products by return rate
+SELECT p.TOY_NO, p.PRODUCT_NAME, p.BRAND,
+       SUM(s.ORDER_QTY) AS sold_qty, COALESCE(SUM(r.RETURN_QTY), 0) AS returned_qty,
+       SAFE_DIVIDE(COALESCE(SUM(r.RETURN_QTY), 0) * 100.0, SUM(s.ORDER_QTY)) AS return_rate_pct
+FROM `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_sales` s
+JOIN `m-mapping-gen-2026.CDL_NovaStar.cdl_dim_product` p ON s.KEY_PRODUCT = p.KEY_PRODUCT
+LEFT JOIN `m-mapping-gen-2026.CDL_NovaStar.cdl_fact_returns` r ON s.KEY_PRODUCT = r.KEY_PRODUCT AND s.KEY_COMPANY = r.KEY_COMPANY
+GROUP BY p.TOY_NO, p.PRODUCT_NAME, p.BRAND
+HAVING sold_qty > 0
+ORDER BY return_rate_pct DESC
+LIMIT 10;

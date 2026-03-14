@@ -99,8 +99,9 @@ class CSVParser:
 
         # Detect multi-header CSV: if no useful columns found, try using row 1 as header
         if not col_map or (len(col_map) <= 1 and "is_key" not in col_map):
-            df = self._reload_with_subheader(file_path)
-            if df is not None:
+            reloaded = self._reload_with_subheader(file_path)
+            if reloaded is not None:
+                df = reloaded
                 df.columns = [c.strip().lower() for c in df.columns]
                 col_map = self._resolve_columns(df.columns.tolist())
 
