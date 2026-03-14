@@ -21,6 +21,17 @@ steps:
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/mapping-generator/app:$COMMIT_SHA'
       - '--region'
       - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--memory'
+      - '1Gi'
+      - '--timeout'
+      - '300'
+      - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'GCP_PROJECT_ID=$PROJECT_ID,LLM_PROVIDER=anthropic'
+      - '--set-secrets'
+      - 'ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest'
 
 images:
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/mapping-generator/app:$COMMIT_SHA'
