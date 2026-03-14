@@ -82,25 +82,6 @@
         </div>
       </div>
 
-      <div class="row">
-        <div class="form-group">
-          <label>Layer</label>
-          <select id="layer">
-            <option value="">Auto-detect</option>
-            <option value="CDL">CDL</option>
-            <option value="Cleansed_RAW">Cleansed_RAW</option>
-            <option value="BL">BL</option>
-            <option value="BR">BR</option>
-          </select>
-          <div class="hint">Leave as auto-detect to infer from file content</div>
-        </div>
-        <div class="form-group">
-          <label>Source Name</label>
-          <input type="text" id="source" placeholder="e.g. PRP1, ANAPLAN, Various">
-          <div class="hint">Optional — auto-detected from input if left blank</div>
-        </div>
-      </div>
-
       <button type="submit" class="btn btn-primary" id="submitBtn">
         <span id="btnText">Generate YAML</span>
         <div class="spinner" id="spinner"></div>
@@ -172,8 +153,6 @@
       e.preventDefault();
       const csvFile = document.getElementById('csvFile').files[0];
       const pdfFile = document.getElementById('pdfFile').files[0];
-      const layer = document.getElementById('layer').value;
-      const source = document.getElementById('source').value;
 
       if (!csvFile && !pdfFile) {
         showError('Please upload at least one file.');
@@ -183,8 +162,8 @@
       const formData = new FormData();
       if (csvFile) formData.append('csv_file', csvFile);
       if (pdfFile) formData.append('pdf_file', pdfFile);
-      formData.append('layer', layer);
-      formData.append('source', source);
+      formData.append('layer', '');
+      formData.append('source', '');
 
       setLoading(true);
       hideError();
@@ -211,8 +190,8 @@
     function renderFiles(files) {
       const list = document.getElementById('fileList');
       list.innerHTML = '';
-      const layer = document.getElementById('layer').value;
-      const isBL = layer === 'BL' || layer === 'BR';
+      // Detect BL/BR layer from generated file content (presence of merge_statement or create_table keys)
+      const isBL = files.some(f => f.content && (f.content.includes('merge_statement:') || f.content.includes('create_table:')));
 
       // Show execute all button for BL/BR layers when BQ is available
       const execAllBtn = document.getElementById('executeAllBtn');

@@ -67,6 +67,11 @@ generator-pipeline/
    export GCP_PROJECT_ID="your-gcp-project"       # required for BigQuery execution
    ```
 
+## Live Demo
+
+The app is deployed on Google Cloud Run:
+**https://mapping-generator-698702654413.us-central1.run.app**
+
 ## Usage
 
 ### Web UI

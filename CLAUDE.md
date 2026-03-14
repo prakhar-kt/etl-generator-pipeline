@@ -55,6 +55,23 @@ generator-pipeline/
 └── requirements.txt            # Python dependencies
 ```
 
+## GitHub & CI/CD
+
+### Repository
+- **Repo**: https://github.com/prakhar-kt/etl-generator-pipeline (public)
+- **Account**: `prakhar-kt`
+
+### Live Web UI
+https://mapping-generator-698702654413.us-central1.run.app
+
+### Continuous Deployment
+Every push to `main` automatically deploys to Cloud Run via Cloud Build:
+1. Cloud Build trigger `gen-pipeline-trigger` fires on push to `main`
+2. Builds Docker image and pushes to Artifact Registry
+3. Deploys new revision to Cloud Run with env vars and secrets
+- Trigger uses deployer service account + `REGIONAL_USER_OWNED_BUCKET` for logs
+- Build console: https://console.cloud.google.com/cloud-build/builds;region=us-central1?project=m-mapping-gen-2026
+
 ## GCP Deployment
 
 ### Project: `m-mapping-gen-2026`
