@@ -33,5 +33,8 @@ steps:
       - '--set-secrets'
       - 'ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest'
 
+options:
+  defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET
+
 images:
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/mapping-generator/app:$COMMIT_SHA'
