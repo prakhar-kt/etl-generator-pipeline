@@ -88,8 +88,9 @@ async def execute_bl(
     if not dataset_name:
         dataset_name = "Business_Logic"
 
-    # Ensure all required datasets exist
+    # Ensure all required datasets exist (use us-central1 to match existing datasets)
     from google.cloud import bigquery as bq
+    bq_location = "us-central1"
     required_datasets = {dataset_name, "Business_Logic", "CDL_NovaStar", "Src_NovaStar"}
     for ds_name in required_datasets:
         try:
@@ -98,7 +99,7 @@ async def execute_bl(
         except Exception:
             try:
                 dataset = bq.Dataset(dataset_ref)
-                dataset.location = "US"
+                dataset.location = bq_location
                 client.create_dataset(dataset)
                 results.append({"step": "create_dataset", "status": "success", "message": f"Created dataset {ds_name}"})
             except Exception as e:
