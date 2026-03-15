@@ -11,7 +11,7 @@ import yaml
 
 from .config import CLAUDE_MODEL, LLM_PROVIDER, MAX_TOKENS
 from .generators.base import _create_llm_client
-from .lessons import format_lessons_prompt
+from .lessons import format_lessons_prompt, store_lesson
 from .sql_utils import cleanup_sql, ensure_datasets, extract_dataset_name, fix_type_mismatches, prepare_merge_sql, replace_placeholders
 from .test_generator import evaluate_test_result, generate_tests
 
@@ -117,13 +117,15 @@ Fix the YAML so the SQL executes successfully.
 
 Return ONLY the corrected YAML content. No markdown fences. No explanation."""
     else:
-        system_prompt = """You are a BigQuery SQL expert. A data quality test failed on a table
+        system_prompt = f"""You are a BigQuery SQL expert. A data quality test failed on a table
 created from a YAML mapping file. The issue could be in either:
 1. The YAML's SQL (merge_statement/create_table) — causing bad data
 2. The test SQL itself — testing incorrectly
 
 Analyze the error and determine which needs fixing. If the YAML SQL is wrong, return the
 full corrected YAML. If the test SQL is wrong, return ONLY the corrected test SQL.
+
+{lessons}
 
 Format your response as:
 FIX_TYPE: yaml
@@ -261,6 +263,12 @@ async def run_execute(
             try:
                 fix = await asyncio.to_thread(call_llm_fix, current_yaml, error_msg, "execution")
                 if fix.get("yaml"):
+                    # Store the error→fix as a lesson for future learning
+                    await asyncio.to_thread(
+                        store_lesson, error_msg[:500],
+                        f"LLM fixed execution error on attempt {attempt}",
+                        "execution"
+                    )
                     version += 1
                     current_yaml = fix["yaml"]
                     yield PipelineEvent(stage="execute", status="running",
@@ -272,6 +280,12 @@ async def run_execute(
                                     message="LLM fix failed", detail=str(llm_err))
                 return
         else:
+            # Store unfixed error as a lesson too
+            await asyncio.to_thread(
+                store_lesson, error_msg[:500],
+                f"UNFIXED: execution failed after {MAX_RETRY} attempts",
+                "execution_unfixed"
+            )
             yield PipelineEvent(stage="execute", status="failed",
                                 message=f"Failed after {MAX_RETRY} attempts",
                                 attempt=attempt, version=version, detail=error_msg)
@@ -383,6 +397,12 @@ async def run_tests(
                         current_test["sql"]
                     )
                     if fix.get("yaml"):
+                        # Store lesson: test failure fixed by YAML change
+                        await asyncio.to_thread(
+                            store_lesson, error_ctx[:500],
+                            f"Fixed {test['name']} by modifying YAML SQL on attempt {attempt}",
+                            f"test_{test['name']}"
+                        )
                         current_yaml = fix["yaml"]
                         # Re-execute YAML then re-run test
                         ok, err = await asyncio.to_thread(
@@ -404,6 +424,12 @@ async def run_tests(
                                             test_name=test["name"], attempt=attempt + 1,
                                             fixed_yaml=current_yaml)
                     elif fix.get("test_sql"):
+                        # Store lesson: test failure fixed by test SQL change
+                        await asyncio.to_thread(
+                            store_lesson, error_ctx[:500],
+                            f"Fixed {test['name']} by modifying test SQL on attempt {attempt}",
+                            f"test_{test['name']}"
+                        )
                         current_test["sql"] = fix["test_sql"]
                         yield PipelineEvent(stage="test_item", status="running",
                                             message=f"Retrying {test['name']} with fixed test SQL...",

@@ -1,4 +1,4 @@
-"""Learn from past YAML generation mistakes stored in pipeline_artifacts."""
+"""Learn from past YAML generation mistakes stored in pipeline_lessons."""
 
 import logging
 import os
@@ -6,6 +6,76 @@ import re
 from collections import defaultdict
 
 logger = logging.getLogger("lessons")
+
+
+# ---------- Lessons storage ----------
+
+LESSONS_DDL = """
+CREATE TABLE IF NOT EXISTS `{project}.Business_Logic.pipeline_lessons` (
+  id              STRING NOT NULL,
+  context         STRING NOT NULL,
+  error_message   STRING NOT NULL,
+  fix_description STRING,
+  error_category  STRING,
+  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+)
+"""
+
+
+def ensure_lessons_table(client, project: str):
+    """Create pipeline_lessons table if it doesn't exist."""
+    try:
+        sql = LESSONS_DDL.format(project=project)
+        job = client.query(sql)
+        job.result()
+    except Exception:
+        pass
+
+
+def store_lesson(error_message: str, fix_description: str, context: str = "execution"):
+    """Store an error→fix lesson in BigQuery for future learning."""
+    try:
+        from google.cloud import bigquery
+        project = os.environ.get("GCP_PROJECT_ID")
+        if not project:
+            return
+        client = bigquery.Client(project=project)
+        ensure_lessons_table(client, project)
+
+        category = _categorize_error(error_message)
+        # Escape for SQL
+        err_esc = error_message.replace("'", "\\'").replace("\\", "\\\\")[:500]
+        fix_esc = fix_description.replace("'", "\\'").replace("\\", "\\\\")[:500]
+        ctx_esc = context[:50]
+        cat_esc = category[:100]
+
+        import uuid
+        sql = f"""INSERT INTO `{project}.Business_Logic.pipeline_lessons`
+        (id, context, error_message, fix_description, error_category, created_at)
+        VALUES ('{uuid.uuid4()}', '{ctx_esc}', '{err_esc}', '{fix_esc}', '{cat_esc}', CURRENT_TIMESTAMP())"""
+        job = client.query(sql)
+        job.result()
+        logger.info(f"Stored lesson: {category}")
+    except Exception as e:
+        logger.debug(f"Failed to store lesson: {e}")
+
+
+def _categorize_error(error_message: str) -> str:
+    """Categorize an error message into a bucket."""
+    msg = error_message.lower()
+    if "float64" in msg and "numeric" in msg:
+        return "type_mismatch_float_numeric"
+    if "not found" in msg and ("column" in msg or "name" in msg):
+        return "column_not_found"
+    if "not grouped" in msg or "not aggregated" in msg:
+        return "group_by_missing"
+    if "syntax error" in msg:
+        return "syntax_error"
+    if "duplicate" in msg:
+        return "duplicate_key"
+    if "as" in msg and "values" in msg:
+        return "as_in_values"
+    return "other"
 
 # Hard-coded lessons from known recurring issues (always included)
 BASELINE_LESSONS = [
@@ -41,7 +111,7 @@ BASELINE_LESSONS = [
 
 
 def get_lessons_from_bq(max_lessons: int = 10) -> list[dict]:
-    """Query pipeline_artifacts for past error→fix pairs and distill into lessons.
+    """Query pipeline_lessons for past error→fix pairs.
 
     Returns list of dicts with keys: error_pattern, rule, example_error
     """
@@ -55,37 +125,12 @@ def get_lessons_from_bq(max_lessons: int = 10) -> list[dict]:
         return []
 
     try:
-        # Find artifacts where execution or tests failed and were later fixed
         sql = f"""
-        WITH failures AS (
-            SELECT
-                artifact_id,
-                version,
-                error_message,
-                yaml_content,
-                ROW_NUMBER() OVER (PARTITION BY artifact_id ORDER BY version ASC) as rn
-            FROM `{project}.Business_Logic.pipeline_artifacts`
-            WHERE error_message IS NOT NULL
-              AND error_message != ''
-              AND LENGTH(error_message) > 10
-        ),
-        fixes AS (
-            SELECT
-                artifact_id,
-                version,
-                yaml_content,
-                status
-            FROM `{project}.Business_Logic.pipeline_artifacts`
-            WHERE status IN ('executed', 'passed')
-        )
-        SELECT
-            f.error_message,
-            f.yaml_content as broken_yaml,
-            fx.yaml_content as fixed_yaml
-        FROM failures f
-        JOIN fixes fx ON f.artifact_id = fx.artifact_id AND fx.version > f.version
-        WHERE f.rn = 1
-        ORDER BY f.version DESC
+        SELECT error_category, error_message, fix_description, context,
+               COUNT(*) as occurrences
+        FROM `{project}.Business_Logic.pipeline_lessons`
+        GROUP BY error_category, error_message, fix_description, context
+        ORDER BY occurrences DESC, error_category
         LIMIT {max_lessons}
         """
         job = client.query(sql)
@@ -94,89 +139,27 @@ def get_lessons_from_bq(max_lessons: int = 10) -> list[dict]:
         if not rows:
             return []
 
-        return _distill_lessons(rows)
+        # Deduplicate by category — keep the one with most occurrences
+        seen_categories = set()
+        lessons = []
+        for row in rows:
+            cat = row.error_category or "other"
+            if cat in seen_categories:
+                continue
+            seen_categories.add(cat)
+            lessons.append({
+                "error_pattern": cat,
+                "rule": row.fix_description or "",
+                "example_error": (row.error_message or "")[:200],
+                "context": row.context or "execution",
+                "occurrences": row.occurrences,
+            })
+
+        return lessons
 
     except Exception as e:
         logger.debug(f"Could not fetch lessons from BQ: {e}")
         return []
-
-
-def _distill_lessons(rows: list) -> list[dict]:
-    """Distill raw error→fix pairs into concise rules."""
-    # Group similar errors
-    error_groups = defaultdict(list)
-    for row in rows:
-        error_msg = row.error_message or ""
-        # Normalize error: strip job IDs, timestamps, etc.
-        normalized = re.sub(r'Job ID: [a-f0-9-]+', '', error_msg)
-        normalized = re.sub(r'Location: \w+', '', normalized)
-        normalized = re.sub(r'at \[\d+:\d+\]', '', normalized)
-        normalized = normalized.strip()
-
-        # Categorize by error type
-        if "FLOAT64" in error_msg and "NUMERIC" in error_msg:
-            key = "type_mismatch_float_numeric"
-        elif "not found" in error_msg.lower() and "column" in error_msg.lower():
-            key = "column_not_found"
-        elif "not grouped" in error_msg.lower() or "not aggregated" in error_msg.lower():
-            key = "group_by_missing"
-        elif "syntax error" in error_msg.lower():
-            key = "syntax_error"
-        elif "duplicate" in error_msg.lower():
-            key = "duplicate_key"
-        elif "NULL" in error_msg or "null" in error_msg:
-            key = "null_values"
-        else:
-            key = normalized[:80]
-
-        error_groups[key].append({
-            "error": error_msg[:300],
-            "broken": (row.broken_yaml or "")[:500],
-            "fixed": (row.fixed_yaml or "")[:500],
-        })
-
-    lessons = []
-    for key, examples in error_groups.items():
-        # Take the most recent example
-        ex = examples[0]
-
-        # Try to extract a concise diff
-        diff_hint = _extract_diff_hint(ex["broken"], ex["fixed"])
-
-        lessons.append({
-            "error_pattern": key,
-            "rule": diff_hint or f"Error occurred: {ex['error'][:200]}",
-            "example_error": ex["error"][:200],
-        })
-
-    return lessons
-
-
-def _extract_diff_hint(broken: str, fixed: str) -> str:
-    """Try to identify what changed between broken and fixed YAML."""
-    if not broken or not fixed:
-        return ""
-
-    broken_lines = set(broken.strip().split('\n'))
-    fixed_lines = set(fixed.strip().split('\n'))
-
-    added = fixed_lines - broken_lines
-    removed = broken_lines - fixed_lines
-
-    # Filter to meaningful changes (skip whitespace-only diffs)
-    added = {l.strip() for l in added if l.strip() and not l.strip().startswith('#')}
-    removed = {l.strip() for l in removed if l.strip() and not l.strip().startswith('#')}
-
-    if not added and not removed:
-        return ""
-
-    hints = []
-    if removed:
-        hints.append("Avoid: " + "; ".join(list(removed)[:2]))
-    if added:
-        hints.append("Use instead: " + "; ".join(list(added)[:2]))
-
-    return " | ".join(hints)[:300]
 
 
 def format_lessons_prompt(max_dynamic: int = 5) -> str:
