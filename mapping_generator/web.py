@@ -160,10 +160,10 @@ async def execute_bl(
         sql = re.sub(r'\bLOAD_DATE\b', 'CDL_LOAD_DATE', sql)
 
         # Fix ADMIN_ROW_HASH: TO_JSON_STRING(src/SOURCE) doesn't work in BQ MERGE
-        # Replace with a constant — row hash is non-critical for initial loads
+        # Replace any FARM_FINGERPRINT(TO_JSON_STRING(...)) with 0 — row hash is non-critical
         sql = re.sub(
-            r'FARM_FINGERPRINT\(TO_JSON_STRING\((?:src|SOURCE(?:\.src)?)\)\)',
-            'FARM_FINGERPRINT(CAST(SOURCE.ADMIN_COMPOSITEKEY_HASH AS STRING))',
+            r'FARM_FINGERPRINT\(TO_JSON_STRING\([^)]*\)\)',
+            '0',
             sql
         )
 
