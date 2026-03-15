@@ -151,16 +151,22 @@ async def execute_bl(
     def cleanup_sql(sql: str) -> str:
         """Fix common LLM-generated SQL issues before execution."""
         import re
-        # Remove AS aliases inside VALUES() — BQ MERGE INSERT doesn't allow them
-        # e.g. '{{ process_id }}' AS ADMIN_PROCESS_ID → '{{ process_id }}'
-        # Match: VALUES ( ... <expr> AS <identifier>, ... )
-        # Find the VALUES clause and strip AS aliases within it
-        def strip_values_aliases(m):
-            body = m.group(1)
-            # Remove AS <identifier> patterns (but not inside subqueries)
-            cleaned = re.sub(r'\s+AS\s+[A-Za-z_][A-Za-z0-9_]*', '', body)
-            return f'VALUES ({cleaned})'
-        sql = re.sub(r'VALUES\s*\(((?:[^()]*|\([^()]*\))*)\)', strip_values_aliases, sql, flags=re.IGNORECASE | re.DOTALL)
+        # Remove AS aliases inside the VALUES() clause of MERGE INSERT.
+        # BQ doesn't allow aliases in VALUES. Use simple string search
+        # instead of regex to avoid catastrophic backtracking on nested parens.
+        upper = sql.upper()
+        # Find "WHEN NOT MATCHED" ... "VALUES (" section
+        values_idx = upper.rfind('VALUES')
+        if values_idx != -1:
+            before = sql[:values_idx]
+            after = sql[values_idx:]
+            # Only strip AS aliases in the VALUES section (after WHEN NOT MATCHED)
+            after = re.sub(r'\)\s+AS\s+[A-Za-z_][A-Za-z0-9_]*', ')', after)
+            after = re.sub(r"'\s+AS\s+[A-Za-z_][A-Za-z0-9_]*", "'", after)
+            after = re.sub(r',\s*\n\s*AS\s+[A-Za-z_][A-Za-z0-9_]*', '', after)
+            # Strip inline AS: `expr AS ALIAS,` → `expr,` (but not CAST(x AS type))
+            after = re.sub(r'(?<!CAST\()(?<!CAST )\b(FALSE|TRUE|CURRENT_TIMESTAMP\(\))\s+AS\s+[A-Za-z_][A-Za-z0-9_]*', r'\1', after)
+            sql = before + after
         return sql
 
     # Step 1: Execute CREATE TABLE
