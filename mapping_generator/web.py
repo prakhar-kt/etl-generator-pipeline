@@ -123,6 +123,10 @@ async def execute_bl(
         sql = sql.replace("{{ source_projects[2] }}", project)
         sql = sql.replace("{{ process_id }}", "web-ui-exec")
         sql = sql.replace("{{ incremental_value }}", "1900-01-01")
+        sql = sql.replace("{{ max_date }}", "1900-01-01 00:00:00")
+        # Catch any remaining {{ ... }} placeholders
+        import re as _re
+        sql = _re.sub(r'\{\{\s*\w+\s*\}\}', "'1900-01-01'", sql)
 
         # Step 3: Route tables to correct datasets based on table name prefix
         # cdl_* tables → CDL_NovaStar, src_*/raw_* → Src_NovaStar
