@@ -111,7 +111,7 @@ LIMIT 5""",
             "description": "Check for NULL values in all columns",
             "sql": null_sql,
             "expected": "all_zero",
-            "severity": "warning",
+            "severity": "error",
             "_columns": columns,
         })
 
