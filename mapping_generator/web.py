@@ -109,35 +109,40 @@ async def execute_bl(
     def replace_placeholders(sql: str) -> str:
         import re
         project = client.project
-        esc_project = re.escape(project)
 
-        # Replace Jinja2 template vars
+        # Step 1: Replace "GBQ Project.Dataset." with just dataset_name FIRST
+        # (before Jinja2 replacement, to avoid creating doubled project refs)
+        sql = re.sub(r'GBQ Project\.Dataset\.', f'{dataset_name}.', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'GBQ Project\.', '', sql, flags=re.IGNORECASE)
+
+        # Step 2: Replace Jinja2 template vars
         sql = sql.replace("{{ target_project }}", project)
         sql = sql.replace("{{ source_projects[0] }}", project)
         sql = sql.replace("{{ source_projects[1] }}", project)
         sql = sql.replace("{{ source_projects[2] }}", project)
         sql = sql.replace("{{ process_id }}", "web-ui-exec")
+        sql = sql.replace("{{ incremental_value }}", "1900-01-01")
 
-        # Fix LLM placeholder "GBQ Project" → actual project
-        sql = re.sub(r'GBQ Project', project, sql, flags=re.IGNORECASE)
+        # Step 3: Route tables to correct datasets based on table name prefix
+        # cdl_* tables → CDL_NovaStar, src_*/raw_* → Src_NovaStar
+        def fix_table_ref(m):
+            prefix = m.group(1)  # everything before the table name
+            table = m.group(2)   # table name
+            tbl_lower = table.lower()
+            if tbl_lower.startswith("cdl_"):
+                ds = "CDL_NovaStar"
+            elif tbl_lower.startswith("src_") or tbl_lower.startswith("raw_"):
+                ds = "Src_NovaStar"
+            else:
+                return m.group(0)  # leave as-is
+            return f"`{project}.{ds}.{table}"
 
-        # Fix generic "Dataset" placeholder used as dataset name
-        # Match `project.Dataset.table` but not `project.Business_Logic.table`
-        sql = re.sub(rf'({esc_project})\.Dataset\.', rf'\1.{dataset_name}.', sql)
-
-        # Fix doubled project name: `project.project.dataset.table` → `project.dataset.table`
-        sql = re.sub(rf'({esc_project})\.{esc_project}\.', rf'\1.', sql)
-
-        # Fix source table datasets: CDL tables belong in CDL_NovaStar, not Business_Logic
-        # Match `project.Business_Logic.cdl_*` → `project.CDL_NovaStar.cdl_*`
+        # Match `project.anything.cdl_*` or `project.anything.src_*`
+        esc_project = re.escape(project)
         sql = re.sub(
-            rf'(`?{esc_project}`?\.)(`?Business_Logic`?\.`?)(cdl_)',
-            rf'\1CDL_NovaStar.\3', sql, flags=re.IGNORECASE
-        )
-        # Similarly for RAW/src tables → Src_NovaStar
-        sql = re.sub(
-            rf'(`?{esc_project}`?\.)(`?Business_Logic`?\.`?)(src_)',
-            rf'\1Src_NovaStar.\3', sql, flags=re.IGNORECASE
+            rf'`{esc_project}\.[^`]*?\.(cdl_|src_|raw_)',
+            lambda m: f'`{project}.{"CDL_NovaStar" if m.group(1) == "cdl_" else "Src_NovaStar"}.{m.group(1)}',
+            sql, flags=re.IGNORECASE
         )
 
         return sql
