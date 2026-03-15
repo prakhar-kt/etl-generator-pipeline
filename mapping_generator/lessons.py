@@ -43,17 +43,20 @@ def store_lesson(error_message: str, fix_description: str, context: str = "execu
         ensure_lessons_table(client, project)
 
         category = _categorize_error(error_message)
-        # Escape for SQL
-        err_esc = error_message.replace("'", "\\'").replace("\\", "\\\\")[:500]
-        fix_esc = fix_description.replace("'", "\\'").replace("\\", "\\\\")[:500]
-        ctx_esc = context[:50]
-        cat_esc = category[:100]
 
         import uuid
+        from google.cloud.bigquery import QueryJobConfig, ScalarQueryParameter
         sql = f"""INSERT INTO `{project}.Business_Logic.pipeline_lessons`
         (id, context, error_message, fix_description, error_category, created_at)
-        VALUES ('{uuid.uuid4()}', '{ctx_esc}', '{err_esc}', '{fix_esc}', '{cat_esc}', CURRENT_TIMESTAMP())"""
-        job = client.query(sql)
+        VALUES (@id, @ctx, @err, @fix, @cat, CURRENT_TIMESTAMP())"""
+        job_config = QueryJobConfig(query_parameters=[
+            ScalarQueryParameter("id", "STRING", str(uuid.uuid4())),
+            ScalarQueryParameter("ctx", "STRING", context[:50]),
+            ScalarQueryParameter("err", "STRING", error_message[:500]),
+            ScalarQueryParameter("fix", "STRING", fix_description[:500]),
+            ScalarQueryParameter("cat", "STRING", category[:100]),
+        ])
+        job = client.query(sql, job_config=job_config)
         job.result()
         logger.info(f"Stored lesson: {category}")
     except Exception as e:
