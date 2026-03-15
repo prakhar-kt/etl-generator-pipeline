@@ -32,6 +32,58 @@ def _get_bq_client():
         return None
 
 
+def _check_existing_yaml(requirements, source_name: str) -> list[dict] | None:
+    """Check if YAML already exists in pipeline_artifacts for the target tables.
+
+    Returns a list of file dicts if found, None otherwise.
+    """
+    client = _get_bq_client()
+    if not client:
+        return None
+
+    # Collect target table names from requirements
+    target_tables = []
+    for tm in requirements.table_mappings:
+        tbl = tm.target_table or requirements.metadata.get("input_filename", "")
+        if tbl:
+            target_tables.append(tbl)
+    if not target_tables:
+        return None
+
+    try:
+        # Look for the latest version of each target table with status passed or executed
+        placeholders = ", ".join(f"'{t}'" for t in target_tables)
+        sql = f"""SELECT target_table, filename, yaml_content, version, status
+                  FROM `{client.project}.Business_Logic.pipeline_artifacts`
+                  WHERE target_table IN ({placeholders})
+                    AND status IN ('passed', 'executed')
+                  QUALIFY ROW_NUMBER() OVER (PARTITION BY target_table ORDER BY version DESC) = 1"""
+        job = client.query(sql)
+        rows = list(job.result())
+
+        if not rows:
+            return None
+
+        # Build file list from stored artifacts
+        output_files = []
+        found_tables = set()
+        for row in rows:
+            found_tables.add(row.target_table)
+            output_files.append({
+                "filename": row.filename,
+                "content": row.yaml_content,
+                "warnings": [f"Loaded from storage (v{row.version}, status: {row.status})"],
+                "validation_errors": [],
+            })
+
+        # Only return cached results if ALL target tables were found
+        if set(target_tables) <= found_tables:
+            return output_files
+        return None
+    except Exception:
+        return None
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return (STATIC_DIR / "index.html").read_text()
@@ -258,7 +310,12 @@ async def generate(
             "input_filename", Path(input_paths[0]).stem
         )
 
-        # Generate
+        # Check if YAML already exists in BQ for these target tables
+        existing_files = _check_existing_yaml(requirements, resolved_source)
+        if existing_files:
+            return {"files": existing_files, "errors": [], "from_cache": True}
+
+        # Generate via LLM
         generator_cls = GENERATORS[resolved_layer]
         generator = generator_cls(api_key=None, mappings_root=str(MAPPINGS_ROOT))
         files = generator.generate(requirements)
