@@ -62,15 +62,23 @@ generator-pipeline/
 - **Account**: `prakhar-kt`
 
 ### Live Web UI
-https://mapping-generator-698702654413.us-central1.run.app
+http://34.61.110.56:8080
 
-### Continuous Deployment
-Every push to `main` automatically deploys to Cloud Run via Cloud Build:
-1. Cloud Build trigger `gen-pipeline-trigger` fires on push to `main`
-2. Builds Docker image and pushes to Artifact Registry
-3. Deploys new revision to Cloud Run with env vars and secrets
-- Trigger uses deployer service account + `REGIONAL_USER_OWNED_BUCKET` for logs
-- Build console: https://console.cloud.google.com/cloud-build/builds;region=us-central1?project=m-mapping-gen-2026
+### Deployment (Compute Engine VM)
+App runs on a Compute Engine VM with systemd auto-restart:
+- **VM**: `mapping-generator-vm` (e2-small, us-central1-a)
+- **IP**: `34.61.110.56:8080`
+- **Service**: `mapping-generator.service` (systemd, auto-starts on boot)
+- **Code**: `/opt/generator-pipeline/` (cloned from GitHub)
+- **Venv**: `/opt/generator-pipeline/venv/`
+- **API key**: passed via instance metadata → fetched by systemd service
+
+To update after code push:
+```bash
+# SSH into VM and pull + restart
+gcloud compute ssh mapping-generator-vm --zone=us-central1-a --project=m-mapping-gen-2026
+cd /opt/generator-pipeline && git pull && sudo systemctl restart mapping-generator
+```
 
 ## GCP Deployment
 
@@ -78,9 +86,7 @@ Every push to `main` automatically deploys to Cloud Run via Cloud Build:
 ### Services Used:
 | Service | Purpose |
 |---------|---------|
-| **Cloud Run** | Hosts FastAPI web UI (mapping generator) |
-| **Artifact Registry** | Docker image storage (`mapping-generator` repo) |
-| **Cloud Build** | Builds container images |
+| **Compute Engine** | Hosts FastAPI web UI (`mapping-generator-vm`) |
 | **Secret Manager** | Stores `ANTHROPIC_API_KEY` |
 | **BigQuery** | Data warehouse (RAW, CDL, BL datasets) |
 

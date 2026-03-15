@@ -69,8 +69,8 @@ generator-pipeline/
 
 ## Live Demo
 
-The app is deployed on Google Cloud Run:
-**https://mapping-generator-698702654413.us-central1.run.app**
+The app is deployed on Google Compute Engine:
+**http://34.61.110.56:8080**
 
 ## Usage
 
