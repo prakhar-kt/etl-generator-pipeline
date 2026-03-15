@@ -43,6 +43,12 @@ def replace_placeholders(sql: str, project: str, dataset_name: str = "Business_L
     # Fix ADMIN_ROW_HASH: TO_JSON_STRING(src/SOURCE) doesn't work in BQ MERGE
     sql = re.sub(r'FARM_FINGERPRINT\(TO_JSON_STRING\([^)]*\)\)', '0', sql)
 
+    # Fix bare `src` table references — LLM sometimes uses src as a STRUCT/alias
+    # that BQ tries to resolve as a table. Remove backtick-quoted `src` references.
+    sql = re.sub(r'`src`', 'src', sql)
+    # Also fix FROM src patterns that aren't part of a CTE
+    sql = re.sub(r'FROM\s+src\s*\)', 'FROM src_data)', sql)
+
     return sql
 
 

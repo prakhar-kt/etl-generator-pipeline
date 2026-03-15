@@ -107,6 +107,10 @@ BASELINE_LESSONS = [
         "error_pattern": "GBQ Project\\.Dataset",
         "rule": "Never use 'GBQ Project.Dataset' as a placeholder. Use {{ source_projects[0] }}.CDL_NovaStar.<table> for CDL tables.",
     },
+    {
+        "error_pattern": "must be qualified with a dataset.*src",
+        "rule": "Do NOT create a STRUCT alias named 'src'. Do NOT use `src` as a table alias or reference. For ADMIN_ROW_HASH, use 0 instead of FARM_FINGERPRINT(TO_JSON_STRING(src)).",
+    },
 ]
 
 
