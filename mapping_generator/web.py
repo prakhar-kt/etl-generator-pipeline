@@ -127,6 +127,18 @@ async def execute_bl(
         # Fix doubled project name: `project.project.dataset.table` → `project.dataset.table`
         sql = re.sub(rf'({esc_project})\.{esc_project}\.', rf'\1.', sql)
 
+        # Fix source table datasets: CDL tables belong in CDL_NovaStar, not Business_Logic
+        # Match `project.Business_Logic.cdl_*` → `project.CDL_NovaStar.cdl_*`
+        sql = re.sub(
+            rf'(`?{esc_project}`?\.)(`?Business_Logic`?\.`?)(cdl_)',
+            rf'\1CDL_NovaStar.\3', sql, flags=re.IGNORECASE
+        )
+        # Similarly for RAW/src tables → Src_NovaStar
+        sql = re.sub(
+            rf'(`?{esc_project}`?\.)(`?Business_Logic`?\.`?)(src_)',
+            rf'\1Src_NovaStar.\3', sql, flags=re.IGNORECASE
+        )
+
         return sql
 
     # Step 1: Execute CREATE TABLE
