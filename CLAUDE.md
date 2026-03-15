@@ -62,12 +62,12 @@ generator-pipeline/
 - **Account**: `prakhar-kt`
 
 ### Live Web UI
-http://34.61.110.56:8080
+http://34.134.87.67:8080
 
 ### Deployment (Compute Engine VM)
 App runs on a Compute Engine VM with systemd auto-restart:
 - **VM**: `mapping-generator-vm` (e2-small, us-central1-a)
-- **IP**: `34.61.110.56:8080`
+- **IP**: `34.134.87.67:8080`
 - **Service**: `mapping-generator.service` (systemd, auto-starts on boot)
 - **Code**: `/opt/generator-pipeline/` (cloned from GitHub)
 - **Venv**: `/opt/generator-pipeline/venv/`

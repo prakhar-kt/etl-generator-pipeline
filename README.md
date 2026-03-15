@@ -70,7 +70,7 @@ generator-pipeline/
 ## Live Demo
 
 The app is deployed on Google Compute Engine:
-**http://34.61.110.56:8080**
+**http://34.134.87.67:8080**
 
 ## Usage
 
