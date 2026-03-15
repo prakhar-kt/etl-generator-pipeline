@@ -1,16 +1,20 @@
 """FastAPI web application for the Smart DTC Mapping Generator."""
 
+import json
 import os
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
 
 import yaml
 from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .cli import GENERATORS, _classify_input, _parse_inputs
 from .config import LAYERS, MAPPINGS_ROOT
+from .pipeline import run_pipeline
+from .sql_utils import cleanup_sql, ensure_datasets, extract_dataset_name, prepare_merge_sql, replace_placeholders
 from .validator import MappingValidator
 
 app = FastAPI(title="Smart DTC Mapping Generator")
@@ -77,123 +81,21 @@ async def execute_bl(
     results = []
     errors = []
 
-    # Extract target dataset name from CREATE TABLE SQL: `project.dataset.table`
+    # Extract target dataset name
     create_sql_raw = mapping.get("create_table", "")
-    dataset_name = None
-    if create_sql_raw:
-        import re
-        m = re.search(r'`[^`]+\.([^`]+)\.[^`]+`', create_sql_raw)
-        if m:
-            dataset_name = m.group(1)
-    if not dataset_name:
-        dataset_name = "Business_Logic"
+    dataset_name = extract_dataset_name(create_sql_raw) if create_sql_raw else "Business_Logic"
 
-    # Ensure all required datasets exist (use us-central1 to match existing datasets)
-    from google.cloud import bigquery as bq
-    bq_location = "us-central1"
-    required_datasets = {dataset_name, "Business_Logic", "CDL_NovaStar", "Src_NovaStar"}
-    for ds_name in required_datasets:
-        try:
-            dataset_ref = bq.DatasetReference(client.project, ds_name)
-            client.get_dataset(dataset_ref)
-        except Exception:
-            try:
-                dataset = bq.Dataset(dataset_ref)
-                dataset.location = bq_location
-                client.create_dataset(dataset)
-                results.append({"step": "create_dataset", "status": "success", "message": f"Created dataset {ds_name}"})
-            except Exception as e:
-                errors.append(f"Failed to create dataset {ds_name}: {e}")
-                results.append({"step": "create_dataset", "status": "error", "message": str(e)})
+    # Ensure all required datasets exist
+    created = ensure_datasets(client, client.project, dataset_name)
+    for ds in created:
+        results.append({"step": "create_dataset", "status": "success", "message": f"Created dataset {ds}"})
 
-    # Replace Jinja2 placeholders and common LLM-generated placeholder text
-    def replace_placeholders(sql: str) -> str:
-        import re
-        project = client.project
-
-        # Step 1: Replace "GBQ Project.Dataset." with just dataset_name FIRST
-        # (before Jinja2 replacement, to avoid creating doubled project refs)
-        sql = re.sub(r'GBQ Project\.Dataset\.', f'{dataset_name}.', sql, flags=re.IGNORECASE)
-        sql = re.sub(r'GBQ Project\.', '', sql, flags=re.IGNORECASE)
-
-        # Step 2: Replace Jinja2 template vars
-        sql = sql.replace("{{ target_project }}", project)
-        sql = sql.replace("{{ source_projects[0] }}", project)
-        sql = sql.replace("{{ source_projects[1] }}", project)
-        sql = sql.replace("{{ source_projects[2] }}", project)
-        sql = sql.replace("{{ process_id }}", "web-ui-exec")
-        sql = sql.replace("{{ incremental_value }}", "1900-01-01")
-        sql = sql.replace("{{ max_date }}", "1900-01-01 00:00:00")
-        # Remove any remaining {{ ... }} placeholders (replace with empty or safe defaults)
-        import re as _re
-        # For quoted contexts like '{{ var }}', replace the whole quoted placeholder
-        sql = _re.sub(r"'\{\{[^}]*\}\}'", "'1900-01-01'", sql)
-        # For unquoted remaining placeholders, just remove the braces
-        sql = _re.sub(r'\{\{[^}]*\}\}', '0', sql)
-
-        # Step 3: Route tables to correct datasets based on table name prefix
-        # cdl_* tables → CDL_NovaStar, src_*/raw_* → Src_NovaStar
-        def fix_table_ref(m):
-            prefix = m.group(1)  # everything before the table name
-            table = m.group(2)   # table name
-            tbl_lower = table.lower()
-            if tbl_lower.startswith("cdl_"):
-                ds = "CDL_NovaStar"
-            elif tbl_lower.startswith("src_") or tbl_lower.startswith("raw_"):
-                ds = "Src_NovaStar"
-            else:
-                return m.group(0)  # leave as-is
-            return f"`{project}.{ds}.{table}"
-
-        # Match `project.anything.cdl_*` or `project.anything.src_*`
-        esc_project = re.escape(project)
-        sql = re.sub(
-            rf'`{esc_project}\.[^`]*?\.(cdl_|src_|raw_)',
-            lambda m: f'`{project}.{"CDL_NovaStar" if m.group(1) == "cdl_" else "Src_NovaStar"}.{m.group(1)}',
-            sql, flags=re.IGNORECASE
-        )
-
-        # Step 4: Fix common LLM column name mistakes for CDL tables
-        # Actual CDL columns use CDL_LOAD_DATE, not LOAD_DATE or LAST_MODIFY_DATE
-        # \b ensures we don't match ADMIN_LOAD_DATE, RAW_LOAD_DATE, CDL_LOAD_DATE
-        sql = re.sub(r'\bLAST_MODIFY_DATE\b', 'CDL_LOAD_DATE', sql)
-        sql = re.sub(r'\bLOAD_DATE\b', 'CDL_LOAD_DATE', sql)
-
-        # Fix ADMIN_ROW_HASH: TO_JSON_STRING(src/SOURCE) doesn't work in BQ MERGE
-        # Replace any FARM_FINGERPRINT(TO_JSON_STRING(...)) with 0 — row hash is non-critical
-        sql = re.sub(
-            r'FARM_FINGERPRINT\(TO_JSON_STRING\([^)]*\)\)',
-            '0',
-            sql
-        )
-
-        return sql
-
-    def cleanup_sql(sql: str) -> str:
-        """Fix common LLM-generated SQL issues before execution."""
-        import re
-        # Remove AS aliases inside the VALUES() clause of MERGE INSERT.
-        # BQ doesn't allow aliases in VALUES. Use simple string search
-        # instead of regex to avoid catastrophic backtracking on nested parens.
-        upper = sql.upper()
-        # Find "WHEN NOT MATCHED" ... "VALUES (" section
-        values_idx = upper.rfind('VALUES')
-        if values_idx != -1:
-            before = sql[:values_idx]
-            after = sql[values_idx:]
-            # Only strip AS aliases in the VALUES section (after WHEN NOT MATCHED)
-            after = re.sub(r'\)\s+AS\s+[A-Za-z_][A-Za-z0-9_]*', ')', after)
-            after = re.sub(r"'\s+AS\s+[A-Za-z_][A-Za-z0-9_]*", "'", after)
-            after = re.sub(r',\s*\n\s*AS\s+[A-Za-z_][A-Za-z0-9_]*', '', after)
-            # Strip inline AS: `expr AS ALIAS,` → `expr,` (but not CAST(x AS type))
-            after = re.sub(r'(?<!CAST\()(?<!CAST )\b(FALSE|TRUE|CURRENT_TIMESTAMP\(\))\s+AS\s+[A-Za-z_][A-Za-z0-9_]*', r'\1', after)
-            sql = before + after
-        return sql
+    project = client.project
 
     # Step 1: Execute CREATE TABLE
     create_sql = mapping.get("create_table", "")
     if create_sql:
-        create_sql = cleanup_sql(replace_placeholders(create_sql))
+        create_sql = cleanup_sql(replace_placeholders(create_sql, project, dataset_name))
         try:
             job = client.query(create_sql)
             job.result()
@@ -205,23 +107,14 @@ async def execute_bl(
     # Step 2: Execute MERGE or other_statement
     merge_sql = mapping.get("merge_statement", "") or mapping.get("other_statement", "")
     if merge_sql:
-        merge_sql = cleanup_sql(replace_placeholders(merge_sql))
-        # Strip any stray SQL before the MERGE/DELETE/INSERT keyword
-        import re as _re2
-        m = _re2.search(r'(?:^|\n)\s*(MERGE\s+INTO|DELETE\s+FROM|INSERT\s+INTO)', merge_sql, _re2.IGNORECASE)
-        if m:
-            merge_sql = merge_sql[m.start(1):]
-
-        # Replace get_max_date inline if referenced
-        max_date_sql = mapping.get("get_max_date", "")
-        if max_date_sql:
-            max_date_sql = replace_placeholders(max_date_sql).rstrip(";").strip()
+        merge_sql = cleanup_sql(replace_placeholders(merge_sql, project, dataset_name))
+        merge_sql = prepare_merge_sql(merge_sql)
 
         try:
             job = client.query(merge_sql)
             job.result()
             affected = job.num_dml_affected_rows
-            msg = f"SQL executed successfully"
+            msg = "SQL executed successfully"
             if affected is not None:
                 msg += f" ({affected:,} rows affected)"
             results.append({"step": "merge/insert", "status": "success", "message": msg})
@@ -233,7 +126,7 @@ async def execute_bl(
     target_table = mapping.get("metadata", {}).get("target_table_name", "")
     if target_table and not errors:
         try:
-            count_sql = f"SELECT COUNT(*) as cnt FROM `{client.project}.Business_Logic.{target_table}`"
+            count_sql = f"SELECT COUNT(*) as cnt FROM `{project}.Business_Logic.{target_table}`"
             job = client.query(count_sql)
             row = list(job.result())[0]
             results.append({"step": "verify", "status": "success", "message": f"Table has {row.cnt:,} rows"})
@@ -241,6 +134,70 @@ async def execute_bl(
             pass  # Non-critical
 
     return {"results": results, "errors": errors}
+
+
+@app.post("/execute-pipeline")
+async def execute_pipeline(
+    yaml_content: str = Form(""),
+    filename: str = Form(""),
+    project_id: str = Form(""),
+):
+    """Execute the full self-healing pipeline with SSE streaming."""
+    client = _get_bq_client()
+    if not client:
+        return JSONResponse(
+            status_code=400,
+            content={"errors": ["BigQuery not available."]},
+        )
+
+    if not yaml_content:
+        return JSONResponse(
+            status_code=400,
+            content={"errors": ["No YAML content provided."]},
+        )
+
+    if project_id:
+        from google.cloud import bigquery
+        client = bigquery.Client(project=project_id)
+
+    async def event_stream():
+        try:
+            async for event in run_pipeline(yaml_content, filename, project_id or client.project, client):
+                data = asdict(event)
+                yield f"data: {json.dumps(data, default=str)}\n\n"
+        except Exception as e:
+            error_event = {
+                "stage": "execute",
+                "status": "failed",
+                "message": f"Pipeline error: {str(e)}",
+                "detail": str(e),
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+        yield "data: {\"stage\": \"done\", \"status\": \"done\", \"message\": \"Pipeline complete\"}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/pipeline-history")
+async def pipeline_history(target_table: str = ""):
+    """Retrieve past pipeline runs from BQ pipeline_artifacts table."""
+    client = _get_bq_client()
+    if not client:
+        return {"runs": []}
+
+    try:
+        where = f"WHERE target_table = '{target_table}'" if target_table else ""
+        sql = f"""SELECT artifact_id, filename, target_table, version, status,
+                         error_message, attempt_number, created_at, updated_at
+                  FROM `{client.project}.Business_Logic.pipeline_artifacts`
+                  {where}
+                  ORDER BY created_at DESC
+                  LIMIT 50"""
+        job = client.query(sql)
+        rows = [dict(r.items()) for r in job.result()]
+        return {"runs": rows}
+    except Exception:
+        return {"runs": []}
 
 
 @app.post("/generate")
@@ -315,12 +272,12 @@ async def generate(
         # Validate and build response
         validator = MappingValidator()
         output_files = []
-        for filename, content in files.items():
+        for fn, content in files.items():
             errors = validator.validate(content, resolved_layer)
             warnings = [str(e) for e in errors if e.severity == "warning"]
             errs = [str(e) for e in errors if e.severity == "error"]
             output_files.append({
-                "filename": filename,
+                "filename": fn,
                 "content": content,
                 "warnings": warnings,
                 "validation_errors": errs,

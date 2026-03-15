@@ -10,7 +10,7 @@
     .header { background: #1a1a2e; color: #fff; padding: 1.5rem 2rem; }
     .header h1 { font-size: 1.4rem; font-weight: 600; }
     .header p { font-size: 0.85rem; color: #a0a0c0; margin-top: 0.3rem; }
-    .container { max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; }
+    .container { max-width: 960px; margin: 2rem auto; padding: 0 1.5rem; }
     .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem; }
     .card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: #1a1a2e; }
     .form-group { margin-bottom: 1rem; }
@@ -24,7 +24,6 @@
     .row { display: flex; gap: 1rem; }
     .row > * { flex: 1; }
     select, input[type="text"] { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d0d5dd; border-radius: 6px; font-size: 0.9rem; }
-    select:focus, input[type="text"]:focus { outline: none; border-color: #4a6cf7; box-shadow: 0 0 0 2px rgba(74,108,247,0.15); }
     .btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.7rem 1.5rem; border: none; border-radius: 6px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
     .btn-primary { background: #4a6cf7; color: #fff; width: 100%; justify-content: center; }
     .btn-primary:hover { background: #3b5de7; }
@@ -34,6 +33,9 @@
     .btn-execute { background: #6366f1; color: #fff; padding: 0.4rem 1rem; font-size: 0.8rem; }
     .btn-execute:hover { background: #4f46e5; }
     .btn-execute:disabled { background: #a5b4fc; cursor: not-allowed; }
+    .btn-pipeline { background: #8b5cf6; color: #fff; padding: 0.4rem 1rem; font-size: 0.8rem; }
+    .btn-pipeline:hover { background: #7c3aed; }
+    .btn-pipeline:disabled { background: #c4b5fd; cursor: not-allowed; }
     .btn-edit { background: #f59e0b; color: #fff; padding: 0.4rem 1rem; font-size: 0.8rem; }
     .btn-edit:hover { background: #d97706; }
     .yaml-edit { background: #1e1e2e; color: #cdd6f4; padding: 1rem; border-radius: 6px; overflow-x: auto; max-height: 400px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; line-height: 1.5; white-space: pre; width: 100%; border: 2px solid #4a6cf7; resize: vertical; min-height: 200px; }
@@ -56,6 +58,38 @@
     .yaml-content { background: #1e1e2e; color: #cdd6f4; padding: 1rem; border-radius: 6px; overflow-x: auto; max-height: 400px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; line-height: 1.5; white-space: pre; }
     #results { display: none; }
     .hint { font-size: 0.75rem; color: #999; margin-top: 0.25rem; }
+
+    /* DAG Pipeline Visualization */
+    .pipeline-dag { display: flex; align-items: flex-start; justify-content: center; gap: 0; padding: 1.5rem 0.5rem; margin: 1rem 0; }
+    .dag-node { width: 170px; border: 2px solid #d0d5dd; border-radius: 12px; padding: 1rem; text-align: center; transition: all 0.3s ease; background: #fff; position: relative; }
+    .dag-node .dag-icon { font-size: 1.5rem; margin-bottom: 0.3rem; }
+    .dag-node .dag-label { font-size: 0.85rem; font-weight: 700; color: #1a1a2e; }
+    .dag-node .dag-status { font-size: 0.72rem; color: #888; margin-top: 0.2rem; min-height: 1.2em; }
+    .dag-node .dag-detail { display: none; font-size: 0.7rem; color: #666; margin-top: 0.4rem; max-height: 80px; overflow-y: auto; text-align: left; background: #f9fafb; border-radius: 4px; padding: 0.3rem 0.5rem; word-break: break-word; }
+    .dag-node.pending { border-color: #d0d5dd; background: #f9fafb; }
+    .dag-node.pending .dag-icon::after { content: "\u25cb"; color: #aaa; }
+    .dag-node.running { border-color: #4a6cf7; background: #eef2ff; animation: pulse 1.5s infinite; }
+    .dag-node.running .dag-icon::after { content: "\u25d4"; color: #4a6cf7; }
+    .dag-node.success { border-color: #22c55e; background: #f0fdf4; }
+    .dag-node.success .dag-icon::after { content: "\u2714"; color: #22c55e; }
+    .dag-node.failed { border-color: #ef4444; background: #fef2f2; }
+    .dag-node.failed .dag-icon::after { content: "\u2716"; color: #ef4444; }
+    .dag-node.retrying { border-color: #f59e0b; background: #fffbeb; animation: pulse 1.5s infinite; }
+    .dag-node.retrying .dag-icon::after { content: "\u21bb"; color: #f59e0b; }
+    @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(74,108,247,0.2); } 50% { box-shadow: 0 0 0 8px rgba(74,108,247,0); } }
+    .dag-connector { display: flex; align-items: center; width: 50px; justify-content: center; padding-top: 1rem; }
+    .dag-connector::before { content: ''; display: block; width: 30px; height: 2px; background: #d0d5dd; }
+    .dag-connector::after { content: ''; display: block; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid #d0d5dd; }
+    .dag-connector.active::before { background: #4a6cf7; }
+    .dag-connector.active::after { border-left-color: #4a6cf7; }
+    .dag-connector.done::before { background: #22c55e; }
+    .dag-connector.done::after { border-left-color: #22c55e; }
+    .dag-test-results { margin-top: 0.5rem; font-size: 0.72rem; text-align: left; }
+    .dag-test-results .test-row { display: flex; align-items: center; gap: 0.3rem; padding: 0.15rem 0; }
+    .dag-test-results .test-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .dag-test-results .test-dot.pass { background: #22c55e; }
+    .dag-test-results .test-dot.fail { background: #ef4444; }
+    .dag-test-results .test-dot.skip { background: #aaa; }
   </style>
 </head>
 <body>
@@ -125,12 +159,10 @@
     setupFileInput('csvFile', 'csvLabel', 'csvDrop');
     setupFileInput('pdfFile', 'pdfLabel', 'pdfDrop');
 
-    // Store generated files for download
     let generatedFiles = [];
     let bqAvailable = false;
     let bqProject = '';
 
-    // Check BigQuery status on load
     async function checkBqStatus() {
       try {
         const resp = await fetch('/bq-status');
@@ -145,9 +177,7 @@
           el.textContent = 'BQ: not connected';
           el.className = 'bq-status disconnected';
         }
-      } catch(e) {
-        // ignore
-      }
+      } catch(e) {}
     }
     checkBqStatus();
 
@@ -156,11 +186,7 @@
       e.preventDefault();
       const csvFile = document.getElementById('csvFile').files[0];
       const pdfFile = document.getElementById('pdfFile').files[0];
-
-      if (!csvFile && !pdfFile) {
-        showError('Please upload at least one file.');
-        return;
-      }
+      if (!csvFile && !pdfFile) { showError('Please upload at least one file.'); return; }
 
       const formData = new FormData();
       if (csvFile) formData.append('csv_file', csvFile);
@@ -177,12 +203,7 @@
         const text = await resp.text();
         let data;
         try { data = JSON.parse(text); } catch { showError('Server error: ' + text.slice(0, 200)); return; }
-
-        if (data.errors && data.errors.length > 0) {
-          showError(data.errors.join('<br>'));
-          return;
-        }
-
+        if (data.errors && data.errors.length > 0) { showError(data.errors.join('<br>')); return; }
         generatedFiles = data.files;
         renderFiles(data.files);
       } catch (err) {
@@ -195,10 +216,7 @@
     function renderFiles(files) {
       const list = document.getElementById('fileList');
       list.innerHTML = '';
-      // Detect BL/BR layer from generated file content (presence of merge_statement or create_table keys)
       const isBL = files.some(f => f.content && (f.content.includes('merge_statement:') || f.content.includes('create_table:')));
-
-      // Show execute all button for BL/BR layers when BQ is available
       const execAllBtn = document.getElementById('executeAllBtn');
       execAllBtn.style.display = (isBL && bqAvailable) ? 'inline-flex' : 'none';
 
@@ -207,13 +225,14 @@
         div.className = 'result-file';
 
         let warningsHtml = '';
-        if (file.warnings && file.warnings.length > 0) {
+        if (file.warnings && file.warnings.length > 0)
           warningsHtml = '<div class="warning-box">Warnings: ' + file.warnings.join('; ') + '</div>';
-        }
-        if (file.validation_errors && file.validation_errors.length > 0) {
+        if (file.validation_errors && file.validation_errors.length > 0)
           warningsHtml += '<div class="error-box" style="margin-top:0.5rem;font-size:0.8rem;">Validation errors: ' + file.validation_errors.join('; ') + '</div>';
-        }
 
+        const pipelineBtn = (isBL && bqAvailable)
+          ? `<button class="btn btn-pipeline" onclick="executePipeline(${i})" id="pipelineBtn${i}">Run Pipeline</button>`
+          : '';
         const execBtn = (isBL && bqAvailable)
           ? `<button class="btn btn-execute" onclick="executeFile(${i})" id="execBtn${i}">Execute</button>`
           : '';
@@ -222,11 +241,13 @@
           <div class="result-file-header">
             <h3>${file.filename}</h3>
             <div style="display:flex;gap:0.5rem;">
+              ${pipelineBtn}
               ${execBtn}
               <button class="btn btn-edit" onclick="toggleEdit(${i})" id="editBtn${i}">Edit</button>
               <button class="btn btn-download" onclick="downloadFile(${i})">Download</button>
             </div>
           </div>
+          <div id="dagContainer${i}" style="display:none;"></div>
           <div id="yamlContainer${i}"><div class="yaml-content">${escapeHtml(file.content)}</div></div>
           ${warningsHtml}
           <div id="execResults${i}" class="exec-results"></div>
@@ -237,11 +258,158 @@
       document.getElementById('results').style.display = 'block';
     }
 
+    // ---------- DAG Pipeline ----------
+
+    function createDAG(index) {
+      const container = document.getElementById('dagContainer' + index);
+      container.style.display = 'block';
+      container.innerHTML = `
+        <div class="pipeline-dag" id="dag${index}">
+          <div class="dag-node pending" id="dag${index}-store">
+            <div class="dag-icon"></div>
+            <div class="dag-label">Store</div>
+            <div class="dag-status">Pending</div>
+            <div class="dag-detail"></div>
+          </div>
+          <div class="dag-connector" id="dagConn${index}-1"></div>
+          <div class="dag-node pending" id="dag${index}-execute">
+            <div class="dag-icon"></div>
+            <div class="dag-label">Execute</div>
+            <div class="dag-status">Pending</div>
+            <div class="dag-detail"></div>
+          </div>
+          <div class="dag-connector" id="dagConn${index}-2"></div>
+          <div class="dag-node pending" id="dag${index}-test">
+            <div class="dag-icon"></div>
+            <div class="dag-label">Test</div>
+            <div class="dag-status">Pending</div>
+            <div class="dag-detail"></div>
+            <div class="dag-test-results" id="dagTests${index}"></div>
+          </div>
+        </div>
+      `;
+    }
+
+    function updateDAGNode(index, event) {
+      const nodeId = `dag${index}-${event.stage}`;
+      const node = document.getElementById(nodeId);
+      if (!node) return;
+
+      node.className = 'dag-node ' + event.status;
+
+      const statusEl = node.querySelector('.dag-status');
+      if (event.status === 'retrying') {
+        statusEl.textContent = `Retry ${event.attempt}/${event.max_attempts}`;
+      } else if (event.status === 'running') {
+        statusEl.textContent = event.message || 'Running...';
+      } else if (event.status === 'success') {
+        statusEl.textContent = event.message || 'Done';
+      } else if (event.status === 'failed') {
+        statusEl.textContent = `Failed (attempt ${event.attempt})`;
+      } else {
+        statusEl.textContent = event.status;
+      }
+
+      // Show detail on failure/retry
+      const detailEl = node.querySelector('.dag-detail');
+      if (event.detail && (event.status === 'failed' || event.status === 'retrying')) {
+        detailEl.textContent = event.detail.slice(0, 500);
+        detailEl.style.display = 'block';
+      }
+
+      // Update connectors
+      if (event.stage === 'store' && (event.status === 'success')) {
+        const conn = document.getElementById(`dagConn${index}-1`);
+        if (conn) conn.className = 'dag-connector done';
+      }
+      if (event.stage === 'execute' && event.status === 'running') {
+        const conn = document.getElementById(`dagConn${index}-1`);
+        if (conn) conn.className = 'dag-connector active';
+      }
+      if (event.stage === 'execute' && event.status === 'success') {
+        const conn = document.getElementById(`dagConn${index}-2`);
+        if (conn) conn.className = 'dag-connector done';
+      }
+      if (event.stage === 'test' && event.status === 'running') {
+        const conn = document.getElementById(`dagConn${index}-2`);
+        if (conn) conn.className = 'dag-connector active';
+      }
+
+      // Show test results
+      if (event.test_results && event.test_results.length > 0) {
+        const testsDiv = document.getElementById(`dagTests${index}`);
+        testsDiv.innerHTML = event.test_results.map(t => {
+          const dotClass = t.status === 'pass' ? 'pass' : (t.status === 'skip' ? 'skip' : 'fail');
+          return `<div class="test-row"><span class="test-dot ${dotClass}"></span>${t.name}: ${t.detail || t.status}</div>`;
+        }).join('');
+      }
+    }
+
+    async function executePipeline(index) {
+      const file = generatedFiles[index];
+      const btn = document.getElementById('pipelineBtn' + index);
+      btn.disabled = true;
+      btn.textContent = 'Running...';
+
+      createDAG(index);
+
+      // Clear previous exec results
+      document.getElementById('execResults' + index).innerHTML = '';
+
+      try {
+        const formData = new FormData();
+        formData.append('yaml_content', file.content);
+        formData.append('filename', file.filename);
+        formData.append('project_id', bqProject);
+
+        const response = await fetch('/execute-pipeline', { method: 'POST', body: formData });
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop();
+
+          for (const part of parts) {
+            if (part.startsWith('data: ')) {
+              try {
+                const event = JSON.parse(part.slice(6));
+                if (event.stage === 'done') continue;
+                updateDAGNode(index, event);
+
+                // If LLM fixed the YAML, update in-memory and re-render
+                if (event.fixed_yaml) {
+                  generatedFiles[index].content = event.fixed_yaml;
+                  const yamlContainer = document.getElementById('yamlContainer' + index);
+                  const yamlDiv = yamlContainer.querySelector('.yaml-content');
+                  if (yamlDiv) yamlDiv.textContent = event.fixed_yaml;
+                }
+              } catch (e) {
+                // ignore parse errors
+              }
+            }
+          }
+        }
+      } catch (err) {
+        const resultsDiv = document.getElementById('execResults' + index);
+        resultsDiv.innerHTML = '<div class="error-box" style="font-size:0.8rem;">Pipeline error: ' + escapeHtml(err.message) + '</div>';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Pipeline';
+      }
+    }
+
+    // ---------- Simple Execute (legacy) ----------
+
     async function executeFile(index) {
       const file = generatedFiles[index];
       const btn = document.getElementById('execBtn' + index);
       const resultsDiv = document.getElementById('execResults' + index);
-
       btn.disabled = true;
       btn.textContent = 'Executing...';
       resultsDiv.innerHTML = '';
@@ -250,9 +418,8 @@
         const formData = new FormData();
         formData.append('yaml_content', file.content);
         formData.append('project_id', bqProject);
-
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 min timeout
+        const timeoutId = setTimeout(() => controller.abort(), 600000);
         const resp = await fetch('/execute-bl', { method: 'POST', body: formData, signal: controller.signal });
         clearTimeout(timeoutId);
         const text = await resp.text();
@@ -262,7 +429,6 @@
         if (data.errors && data.errors.length > 0) {
           resultsDiv.innerHTML = '<div class="error-box" style="font-size:0.8rem;">' + data.errors.join('<br>') + '</div>';
         }
-
         if (data.results) {
           let html = '';
           data.results.forEach(r => {
@@ -271,15 +437,13 @@
           });
           resultsDiv.innerHTML += html;
         }
-
-        const allSuccess = data.results && data.results.every(r => r.status === 'success');
-        if (allSuccess) {
+        if (data.results && data.results.every(r => r.status === 'success')) {
           resultsDiv.innerHTML = '<div class="success-box">Successfully executed against BigQuery</div>' + resultsDiv.innerHTML;
         }
       } catch (err) {
         let msg = err.message;
-        if (err.name === 'AbortError') msg = 'Request timed out (10 min). The query may still be running in BigQuery.';
-        if (msg === 'Failed to fetch') msg = 'Failed to fetch — check that you are accessing the app via http:// (not https://) and the server is reachable.';
+        if (err.name === 'AbortError') msg = 'Request timed out (10 min).';
+        if (msg === 'Failed to fetch') msg = 'Failed to fetch - check http:// access and server reachability.';
         resultsDiv.innerHTML = '<div class="error-box" style="font-size:0.8rem;">Execution failed: ' + msg + '</div>';
       } finally {
         btn.disabled = false;
@@ -288,18 +452,14 @@
     }
 
     document.getElementById('executeAllBtn').addEventListener('click', async () => {
-      for (let i = 0; i < generatedFiles.length; i++) {
-        await executeFile(i);
-      }
+      for (let i = 0; i < generatedFiles.length; i++) await executeFile(i);
     });
 
     function toggleEdit(index) {
       const file = generatedFiles[index];
       const container = document.getElementById('yamlContainer' + index);
       const btn = document.getElementById('editBtn' + index);
-
       if (btn.textContent === 'Edit') {
-        // Switch to edit mode
         const textarea = document.createElement('textarea');
         textarea.className = 'yaml-edit';
         textarea.value = file.content;
@@ -310,7 +470,6 @@
         btn.textContent = 'Save';
         btn.style.background = '#22c55e';
       } else {
-        // Save changes
         const textarea = document.getElementById('yamlEdit' + index);
         generatedFiles[index].content = textarea.value;
         const div = document.createElement('div');
@@ -339,29 +498,14 @@
     });
 
     function setLoading(loading) {
-      const btn = document.getElementById('submitBtn');
-      const text = document.getElementById('btnText');
-      const spinner = document.getElementById('spinner');
-      btn.disabled = loading;
-      text.textContent = loading ? 'Generating...' : 'Generate YAML';
-      spinner.style.display = loading ? 'block' : 'none';
+      document.getElementById('submitBtn').disabled = loading;
+      document.getElementById('btnText').textContent = loading ? 'Generating...' : 'Generate YAML';
+      document.getElementById('spinner').style.display = loading ? 'block' : 'none';
     }
 
-    function showError(msg) {
-      const box = document.getElementById('errorBox');
-      box.innerHTML = msg;
-      box.style.display = 'block';
-    }
-
-    function hideError() {
-      document.getElementById('errorBox').style.display = 'none';
-    }
-
-    function escapeHtml(str) {
-      const div = document.createElement('div');
-      div.textContent = str;
-      return div.innerHTML;
-    }
+    function showError(msg) { const b = document.getElementById('errorBox'); b.innerHTML = msg; b.style.display = 'block'; }
+    function hideError() { document.getElementById('errorBox').style.display = 'none'; }
+    function escapeHtml(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
   </script>
 </body>
 </html>
