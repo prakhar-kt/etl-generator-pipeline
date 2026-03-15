@@ -156,6 +156,15 @@ cdl_dim_calendar: KEY_CALENDAR, CALENDAR_DATE, YEAR, QUARTER, MONTH, WEEK, DAY_O
 - Every non-aggregated column in a SELECT that uses GROUP BY MUST appear in the GROUP BY clause. No exceptions.
 - When using aggregate functions (SUM, MAX, COUNT, etc.), ALL other columns in the SELECT must be in GROUP BY.
 
+## CRITICAL type casting rules:
+- Column types in CREATE TABLE must EXACTLY match the types specified in the requirements CSV (Field Type column).
+- When a column is declared as NUMERIC in the DDL, ALL expressions assigned to it MUST be explicitly cast: CAST(expr AS NUMERIC).
+- Division operations (/, SAFE_DIVIDE) return FLOAT64 in BigQuery. If the target column is NUMERIC, ALWAYS wrap with CAST(... AS NUMERIC).
+- Multiplication with decimals (e.g. * 100.0) also returns FLOAT64. Use CAST(... AS NUMERIC) or CAST(... AS INT64) based on the target column type.
+- ROUND() returns FLOAT64. Wrap with CAST(ROUND(...) AS NUMERIC) for NUMERIC columns.
+- SUM() of INT64 returns INT64, SUM() of NUMERIC returns NUMERIC — these are safe without casting.
+- COALESCE default values must match the column type: use CAST(0 AS NUMERIC) not just 0 for NUMERIC columns.
+
 ## CRITICAL Jinja2 source table format:
 - CDL source tables MUST use: `{{{{ source_projects[0] }}}}.CDL_NovaStar.<table_name>` — for example `{{{{ source_projects[0] }}}}.CDL_NovaStar.cdl_fact_sales`
 - NEVER use patterns like `{{{{ source_projects[0] }}}}.GBQ Project.Dataset.table` or any other placeholder dataset names.

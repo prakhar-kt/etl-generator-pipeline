@@ -65,6 +65,62 @@ def cleanup_sql(sql: str) -> str:
     return sql
 
 
+def fix_type_mismatches(merge_sql: str, create_sql: str) -> str:
+    """Fix FLOAT64/NUMERIC type mismatches in MERGE SQL based on DDL column types.
+
+    When a NUMERIC column gets assigned a FLOAT64 expression (division, ROUND, etc.),
+    wrap the expression with CAST(... AS NUMERIC).
+    """
+    if not create_sql or not merge_sql:
+        return merge_sql
+
+    # Extract NUMERIC columns from DDL
+    numeric_cols = set()
+    for line in create_sql.split('\n'):
+        line = line.strip().rstrip(',')
+        m = re.match(r'(\w+)\s+NUMERIC', line)
+        if m:
+            numeric_cols.add(m.group(1).upper())
+
+    if not numeric_cols:
+        return merge_sql
+
+    # Functions that return FLOAT64 in BigQuery
+    float_funcs = r'(?:SAFE_DIVIDE|ROUND|IEEE_DIVIDE|SQRT|LOG|LN|EXP|POW|ACOS|ASIN|ATAN)'
+
+    for col in numeric_cols:
+        # Fix UPDATE SET: TARGET.COL = float_expr → TARGET.COL = CAST(float_expr AS NUMERIC)
+        pattern = rf'(TARGET\.{col}\s*=\s*)(?!CAST\()(?!SOURCE\.)({float_funcs}\s*\()'
+        def wrap_update(m):
+            prefix = m.group(1)
+            expr_start = m.group(2)
+            # Find the full expression by matching balanced parens
+            return prefix + 'CAST(' + expr_start
+        # Simple approach: if we see TARGET.COL = SAFE_DIVIDE/ROUND, insert CAST
+        merge_sql = re.sub(
+            rf'(TARGET\.{col}\s*=\s*)({float_funcs}\s*\([^;\n]*?)(\s*,\s*\n|\s*$)',
+            rf'\1CAST(\2 AS NUMERIC)\3',
+            merge_sql, flags=re.IGNORECASE | re.MULTILINE
+        )
+
+        # Fix SELECT: float_expr AS COL → CAST(float_expr AS NUMERIC) AS COL
+        # Match function call with possible nested parens, then AS COL
+        merge_sql = re.sub(
+            rf'(?<!CAST\()({float_funcs}\s*\((?:[^()]*\([^()]*\))*[^()]*\)(?:\s*\*\s*[\d.]+)?)\s+AS\s+{col}\b',
+            rf'CAST(\1 AS NUMERIC) AS {col}',
+            merge_sql, flags=re.IGNORECASE
+        )
+
+        # Also fix: plain arithmetic like (A - B) * 100.0 AS COL
+        merge_sql = re.sub(
+            rf'(?<!CAST\()((?:COALESCE\s*\([^)]+\)\s*[-+*/]\s*)+[^\n,]+?(?:\*\s*[\d.]+))\s+AS\s+{col}\b',
+            rf'CAST(\1 AS NUMERIC) AS {col}',
+            merge_sql, flags=re.IGNORECASE
+        )
+
+    return merge_sql
+
+
 def prepare_merge_sql(sql: str) -> str:
     """Strip any stray SQL before the MERGE/DELETE/INSERT keyword."""
     m = re.search(r'(?:^|\n)\s*(MERGE\s+INTO|DELETE\s+FROM|INSERT\s+INTO)', sql, re.IGNORECASE)

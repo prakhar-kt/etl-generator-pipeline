@@ -11,7 +11,7 @@ import yaml
 
 from .config import CLAUDE_MODEL, LLM_PROVIDER, MAX_TOKENS
 from .generators.base import _create_llm_client
-from .sql_utils import cleanup_sql, ensure_datasets, extract_dataset_name, prepare_merge_sql, replace_placeholders
+from .sql_utils import cleanup_sql, ensure_datasets, extract_dataset_name, fix_type_mismatches, prepare_merge_sql, replace_placeholders
 from .test_generator import evaluate_test_result, generate_tests
 
 logger = logging.getLogger("pipeline")
@@ -197,6 +197,9 @@ def _execute_yaml_sql(client, yaml_content: str, project: str, dataset_name: str
     # MERGE / INSERT
     merge_sql = mapping.get("merge_statement", "") or mapping.get("other_statement", "")
     if merge_sql:
+        # Fix type mismatches (FLOAT64 → NUMERIC) based on DDL
+        raw_create = mapping.get("create_table", "")
+        merge_sql = fix_type_mismatches(merge_sql, raw_create)
         merge_sql = cleanup_sql(replace_placeholders(merge_sql, project, dataset_name))
         merge_sql = prepare_merge_sql(merge_sql)
         try:
