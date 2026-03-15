@@ -60,12 +60,11 @@
     .hint { font-size: 0.75rem; color: #999; margin-top: 0.25rem; }
 
     /* DAG Pipeline Visualization */
-    .pipeline-dag { display: flex; align-items: flex-start; justify-content: center; gap: 0; padding: 1.5rem 0.5rem; margin: 1rem 0; }
-    .dag-node { width: 170px; border: 2px solid #d0d5dd; border-radius: 12px; padding: 1rem; text-align: center; transition: all 0.3s ease; background: #fff; position: relative; }
-    .dag-node .dag-icon { font-size: 1.5rem; margin-bottom: 0.3rem; }
-    .dag-node .dag-label { font-size: 0.85rem; font-weight: 700; color: #1a1a2e; }
-    .dag-node .dag-status { font-size: 0.72rem; color: #888; margin-top: 0.2rem; min-height: 1.2em; }
-    .dag-node .dag-detail { display: none; font-size: 0.7rem; color: #666; margin-top: 0.4rem; max-height: 80px; overflow-y: auto; text-align: left; background: #f9fafb; border-radius: 4px; padding: 0.3rem 0.5rem; word-break: break-word; }
+    .pipeline-dag { display: flex; align-items: flex-start; justify-content: center; gap: 0; padding: 1.5rem 0.5rem; margin: 1rem 0; flex-wrap: wrap; }
+    .dag-node { width: 150px; border: 2px solid #d0d5dd; border-radius: 12px; padding: 0.8rem; text-align: center; transition: all 0.3s ease; background: #fff; position: relative; flex-shrink: 0; }
+    .dag-node .dag-icon { font-size: 1.3rem; margin-bottom: 0.2rem; }
+    .dag-node .dag-label { font-size: 0.78rem; font-weight: 700; color: #1a1a2e; }
+    .dag-node .dag-status { font-size: 0.68rem; color: #888; margin-top: 0.15rem; min-height: 1.1em; }
     .dag-node.pending { border-color: #d0d5dd; background: #f9fafb; }
     .dag-node.pending .dag-icon::after { content: "\u25cb"; color: #aaa; }
     .dag-node.running { border-color: #4a6cf7; background: #eef2ff; animation: pulse 1.5s infinite; }
@@ -77,19 +76,19 @@
     .dag-node.retrying { border-color: #f59e0b; background: #fffbeb; animation: pulse 1.5s infinite; }
     .dag-node.retrying .dag-icon::after { content: "\u21bb"; color: #f59e0b; }
     @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(74,108,247,0.2); } 50% { box-shadow: 0 0 0 8px rgba(74,108,247,0); } }
-    .dag-connector { display: flex; align-items: center; width: 50px; justify-content: center; padding-top: 1rem; }
-    .dag-connector::before { content: ''; display: block; width: 30px; height: 2px; background: #d0d5dd; }
-    .dag-connector::after { content: ''; display: block; width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 8px solid #d0d5dd; }
+    .dag-connector { display: flex; align-items: center; width: 36px; justify-content: center; padding-top: 0.8rem; flex-shrink: 0; }
+    .dag-connector::before { content: ''; display: block; width: 20px; height: 2px; background: #d0d5dd; }
+    .dag-connector::after { content: ''; display: block; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 6px solid #d0d5dd; }
     .dag-connector.active::before { background: #4a6cf7; }
     .dag-connector.active::after { border-left-color: #4a6cf7; }
     .dag-connector.done::before { background: #22c55e; }
     .dag-connector.done::after { border-left-color: #22c55e; }
-    .dag-test-results { margin-top: 0.5rem; font-size: 0.72rem; text-align: left; }
-    .dag-test-results .test-row { display: flex; align-items: center; gap: 0.3rem; padding: 0.15rem 0; }
-    .dag-test-results .test-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-    .dag-test-results .test-dot.pass { background: #22c55e; }
-    .dag-test-results .test-dot.fail { background: #ef4444; }
-    .dag-test-results .test-dot.skip { background: #aaa; }
+    .dag-error-panel { margin-top: 0.8rem; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 6px; padding: 0.8rem 1rem; font-size: 0.8rem; color: #dc2626; }
+    .dag-error-panel h4 { font-size: 0.82rem; margin-bottom: 0.4rem; color: #991b1b; }
+    .dag-error-item { padding: 0.3rem 0; border-bottom: 1px solid #fecaca; }
+    .dag-error-item:last-child { border-bottom: none; }
+    .dag-error-item .error-test-name { font-weight: 700; }
+    .dag-error-item .error-detail { color: #b91c1c; font-size: 0.75rem; margin-top: 0.15rem; word-break: break-word; }
   </style>
 </head>
 <body>
@@ -260,43 +259,152 @@
 
     // ---------- DAG Pipeline ----------
 
+    const TEST_LABELS = {
+      'duplicate_check': 'Duplicate Check',
+      'null_check': 'Null Check',
+      'row_count_check': 'Row Count',
+      'schema_check': 'Schema Check',
+      'source_coverage': 'Source Coverage',
+    };
+
+    function getTestLabel(name) {
+      for (const [key, label] of Object.entries(TEST_LABELS)) {
+        if (name.startsWith(key)) return label;
+      }
+      return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    let dagTestNodesCreated = {};
+
     function createDAG(index) {
       const container = document.getElementById('dagContainer' + index);
       container.style.display = 'block';
+      dagTestNodesCreated[index] = false;
       container.innerHTML = `
         <div class="pipeline-dag" id="dag${index}">
           <div class="dag-node pending" id="dag${index}-store">
             <div class="dag-icon"></div>
             <div class="dag-label">Store</div>
             <div class="dag-status">Pending</div>
-            <div class="dag-detail"></div>
           </div>
           <div class="dag-connector" id="dagConn${index}-1"></div>
           <div class="dag-node pending" id="dag${index}-execute">
             <div class="dag-icon"></div>
             <div class="dag-label">Execute</div>
             <div class="dag-status">Pending</div>
-            <div class="dag-detail"></div>
           </div>
           <div class="dag-connector" id="dagConn${index}-2"></div>
           <div class="dag-node pending" id="dag${index}-test">
             <div class="dag-icon"></div>
-            <div class="dag-label">Test</div>
+            <div class="dag-label">Tests</div>
             <div class="dag-status">Pending</div>
-            <div class="dag-detail"></div>
-            <div class="dag-test-results" id="dagTests${index}"></div>
           </div>
         </div>
+        <div id="dagErrors${index}"></div>
       `;
     }
 
+    function createTestNodes(index, testResults) {
+      if (dagTestNodesCreated[index]) return;
+      dagTestNodesCreated[index] = true;
+
+      const dag = document.getElementById('dag' + index);
+      // Remove the placeholder test node
+      const placeholderTest = document.getElementById(`dag${index}-test`);
+      const placeholderConn = document.getElementById(`dagConn${index}-2`);
+      if (placeholderTest) placeholderTest.remove();
+      if (placeholderConn) placeholderConn.remove();
+
+      // Add individual test nodes
+      testResults.forEach((t, ti) => {
+        const connHtml = `<div class="dag-connector ${ti === 0 ? 'done' : ''}" id="dagConn${index}-test${ti}"></div>`;
+        const nodeHtml = `<div class="dag-node pending" id="dag${index}-test-${t.name}">
+          <div class="dag-icon"></div>
+          <div class="dag-label">${getTestLabel(t.name)}</div>
+          <div class="dag-status">Pending</div>
+        </div>`;
+        dag.insertAdjacentHTML('beforeend', connHtml + nodeHtml);
+      });
+    }
+
+    function updateTestNodes(index, testResults) {
+      testResults.forEach((t, ti) => {
+        const node = document.getElementById(`dag${index}-test-${t.name}`);
+        if (!node) return;
+        const statusClass = t.status === 'pass' ? 'success' : (t.status === 'skip' ? 'pending' : 'failed');
+        node.className = 'dag-node ' + statusClass;
+        node.querySelector('.dag-status').textContent = t.detail || t.status;
+
+        // Update connector
+        const conn = document.getElementById(`dagConn${index}-test${ti}`);
+        if (conn) conn.className = 'dag-connector ' + (statusClass === 'success' ? 'done' : (statusClass === 'failed' ? 'active' : ''));
+      });
+
+      // Show error panel at bottom for failures
+      const failures = testResults.filter(t => t.status === 'fail' || t.status === 'error');
+      const errorPanel = document.getElementById('dagErrors' + index);
+      if (failures.length > 0) {
+        errorPanel.innerHTML = `<div class="dag-error-panel">
+          <h4>Failed Tests (${failures.length})</h4>
+          ${failures.map(f => `<div class="dag-error-item">
+            <div class="error-test-name">${getTestLabel(f.name)}</div>
+            <div class="error-detail">${escapeHtml(f.detail || 'No details')}</div>
+          </div>`).join('')}
+        </div>`;
+      } else {
+        errorPanel.innerHTML = '';
+      }
+    }
+
     function updateDAGNode(index, event) {
+      // Handle test events with individual nodes
+      if (event.stage === 'test' && event.test_results && event.test_results.length > 0) {
+        createTestNodes(index, event.test_results);
+        // Set all test nodes to running during retry
+        if (event.status === 'running' || event.status === 'retrying') {
+          event.test_results.forEach(t => {
+            const node = document.getElementById(`dag${index}-test-${t.name}`);
+            if (node) {
+              node.className = 'dag-node running';
+              node.querySelector('.dag-status').textContent = event.status === 'retrying'
+                ? `Retry ${event.attempt}/${event.max_attempts}` : 'Running...';
+            }
+          });
+          if (event.status === 'retrying') {
+            // Still show error panel during retry
+            updateTestNodes(index, event.test_results);
+          }
+        } else {
+          updateTestNodes(index, event.test_results);
+        }
+        // Update execute→test connector
+        const conn0 = document.getElementById(`dagConn${index}-test0`);
+        if (conn0 && (event.status === 'running' || event.status === 'retrying')) {
+          conn0.className = 'dag-connector active';
+        }
+        if (conn0 && event.status === 'success') {
+          conn0.className = 'dag-connector done';
+        }
+        return;
+      }
+
+      // Handle test stage without results yet (initial running state)
+      if (event.stage === 'test') {
+        const placeholder = document.getElementById(`dag${index}-test`);
+        if (placeholder) {
+          placeholder.className = 'dag-node ' + event.status;
+          placeholder.querySelector('.dag-status').textContent = event.message || event.status;
+        }
+        const conn = document.getElementById(`dagConn${index}-2`);
+        if (conn) conn.className = 'dag-connector active';
+        return;
+      }
+
       const nodeId = `dag${index}-${event.stage}`;
       const node = document.getElementById(nodeId);
       if (!node) return;
 
       node.className = 'dag-node ' + event.status;
-
       const statusEl = node.querySelector('.dag-status');
       if (event.status === 'retrying') {
         statusEl.textContent = `Retry ${event.attempt}/${event.max_attempts}`;
@@ -305,20 +413,24 @@
       } else if (event.status === 'success') {
         statusEl.textContent = event.message || 'Done';
       } else if (event.status === 'failed') {
-        statusEl.textContent = `Failed (attempt ${event.attempt})`;
+        statusEl.textContent = `Failed`;
       } else {
         statusEl.textContent = event.status;
       }
 
-      // Show detail on failure/retry
-      const detailEl = node.querySelector('.dag-detail');
-      if (event.detail && (event.status === 'failed' || event.status === 'retrying')) {
-        detailEl.textContent = event.detail.slice(0, 500);
-        detailEl.style.display = 'block';
+      // Show execution errors in error panel
+      if (event.stage === 'execute' && event.detail && (event.status === 'failed' || event.status === 'retrying')) {
+        const errorPanel = document.getElementById('dagErrors' + index);
+        errorPanel.innerHTML = `<div class="dag-error-panel">
+          <h4>Execution Error${event.status === 'retrying' ? ` (retrying ${event.attempt}/${event.max_attempts})` : ''}</h4>
+          <div class="dag-error-item">
+            <div class="error-detail">${escapeHtml(event.detail.slice(0, 800))}</div>
+          </div>
+        </div>`;
       }
 
       // Update connectors
-      if (event.stage === 'store' && (event.status === 'success')) {
+      if (event.stage === 'store' && event.status === 'success') {
         const conn = document.getElementById(`dagConn${index}-1`);
         if (conn) conn.className = 'dag-connector done';
       }
@@ -327,21 +439,8 @@
         if (conn) conn.className = 'dag-connector active';
       }
       if (event.stage === 'execute' && event.status === 'success') {
-        const conn = document.getElementById(`dagConn${index}-2`);
-        if (conn) conn.className = 'dag-connector done';
-      }
-      if (event.stage === 'test' && event.status === 'running') {
-        const conn = document.getElementById(`dagConn${index}-2`);
-        if (conn) conn.className = 'dag-connector active';
-      }
-
-      // Show test results
-      if (event.test_results && event.test_results.length > 0) {
-        const testsDiv = document.getElementById(`dagTests${index}`);
-        testsDiv.innerHTML = event.test_results.map(t => {
-          const dotClass = t.status === 'pass' ? 'pass' : (t.status === 'skip' ? 'skip' : 'fail');
-          return `<div class="test-row"><span class="test-dot ${dotClass}"></span>${t.name}: ${t.detail || t.status}</div>`;
-        }).join('');
+        // Clear any execution error panel
+        document.getElementById('dagErrors' + index).innerHTML = '';
       }
     }
 
