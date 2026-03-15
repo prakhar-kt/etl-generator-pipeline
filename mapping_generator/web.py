@@ -146,6 +146,12 @@ async def execute_bl(
             sql, flags=re.IGNORECASE
         )
 
+        # Step 4: Fix common LLM column name mistakes for CDL tables
+        # Actual CDL columns use CDL_LOAD_DATE, not LOAD_DATE or LAST_MODIFY_DATE
+        # \b ensures we don't match ADMIN_LOAD_DATE, RAW_LOAD_DATE, CDL_LOAD_DATE
+        sql = re.sub(r'\bLAST_MODIFY_DATE\b', 'CDL_LOAD_DATE', sql)
+        sql = re.sub(r'\bLOAD_DATE\b', 'CDL_LOAD_DATE', sql)
+
         return sql
 
     def cleanup_sql(sql: str) -> str:
