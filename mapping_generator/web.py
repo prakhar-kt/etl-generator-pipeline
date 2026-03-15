@@ -104,7 +104,7 @@ async def execute_bl(
             errors.append(f"Failed to create dataset {dataset_name}: {e}")
             results.append({"step": "create_dataset", "status": "error", "message": str(e)})
 
-    # Replace Jinja2 placeholders with actual project
+    # Replace Jinja2 placeholders and common LLM-generated placeholder text
     def replace_placeholders(sql: str) -> str:
         project = client.project
         sql = sql.replace("{{ target_project }}", project)
@@ -112,6 +112,16 @@ async def execute_bl(
         sql = sql.replace("{{ source_projects[1] }}", project)
         sql = sql.replace("{{ source_projects[2] }}", project)
         sql = sql.replace("{{ process_id }}", "web-ui-exec")
+        # Fix common LLM-generated placeholder patterns from CSV header descriptions
+        # e.g. `GBQ Project.Dataset.table` → `actual-project.Business_Logic.table`
+        import re
+        sql = re.sub(r'`GBQ Project\.Dataset\.', f'`{project}.{dataset_name}.', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'`GBQ Project\.', f'`{project}.', sql, flags=re.IGNORECASE)
+        # Also handle unbackticked references
+        sql = re.sub(r'GBQ Project\.Dataset\.', f'{project}.{dataset_name}.', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'GBQ Project\.', f'{project}.', sql, flags=re.IGNORECASE)
+        # Fix dataset placeholder: `project.Dataset.table` → `project.Business_Logic.table`
+        sql = re.sub(rf'`{re.escape(project)}\.Dataset\.', f'`{project}.{dataset_name}.', sql)
         return sql
 
     # Step 1: Execute CREATE TABLE
