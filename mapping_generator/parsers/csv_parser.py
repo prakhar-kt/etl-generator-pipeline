@@ -85,7 +85,7 @@ class CSVParser:
     }
 
     # Prefixes that identify dimension/lookup tables (used for JOINs, not primary sources)
-    _DIM_TABLE_PREFIXES = ("bl_dim_", "dim_", "bl_fact_preferred_", "bl_fact_toy_")
+    _DIM_TABLE_PREFIXES = ("bl_dim_", "dim_", "cdl_dim_", "bl_fact_preferred_", "bl_fact_toy_")
 
     def parse(self, file_path: str | Path) -> ParsedRequirements:
         file_path = Path(file_path)

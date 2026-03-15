@@ -24,7 +24,7 @@ class BLGenerator(BaseGenerator):
     layer = "BL"
 
     # Known dimension / lookup table prefixes — these are JOIN tables, not primary sources
-    _DIM_PREFIXES = ("bl_dim_", "dim_", "bl_fact_preferred_", "bl_fact_toy_")
+    _DIM_PREFIXES = ("bl_dim_", "dim_", "cdl_dim_", "bl_fact_preferred_", "bl_fact_toy_")
     # Known CDL source prefixes — presence means this is a CDL-to-BL pattern
     _CDL_PREFIXES = ("cdl_",)
 
@@ -121,6 +121,7 @@ The YAML file must have these exact top-level keys:
 - ALWAYS apply REPLACE, SAFE_CAST, and other transforms EXACTLY as specified in the field mappings
 - ALWAYS include a deduplication step using ROW_NUMBER() OVER (PARTITION BY composite_key ORDER BY CDL_LOAD_DATE DESC) WHERE RN = 1
 - ALWAYS use SELECT DISTINCT in base CTEs to eliminate duplicate source rows
+- When combining multiple fact tables (e.g., demand_forecast + sales_forecast + sales), ALWAYS pre-aggregate each source in its own CTE before joining. Never cross-join raw fact tables — this causes fan-out duplicates.
 - ADMIN_COMPOSITEKEY_HASH must include ALL composite key columns (all fields marked as KEY plus date range fields)
 - ADMIN_ROW_HASH must include ALL non-admin data columns
 - ADMIN_ISERROR should check ONLY key/required fields (typically COMPANY_CODE, main entity codes) for NULL
@@ -291,18 +292,38 @@ IMPORTANT: This is a BL to BL table that requires full refresh logic.
             # CDL to BL instructions
             cdl_source = primary_sources[0] if primary_sources else source_tables[0]
             join_table_list = ", ".join(join_tables) if join_tables else "none"
+
+            # Multi-fact source handling: when multiple CDL fact tables feed one BL table
+            multi_fact_instructions = ""
+            cdl_fact_sources = [s for s in primary_sources if s.lower().startswith("cdl_fact_")]
+            if len(cdl_fact_sources) > 1:
+                fact_list = ", ".join(cdl_fact_sources)
+                multi_fact_instructions = f"""
+
+## CRITICAL: Multiple CDL fact sources detected ({fact_list})
+When combining data from multiple fact tables, you MUST:
+1. Create a SEPARATE CTE for each fact source that pre-aggregates to the target grain BEFORE joining.
+   Each CTE should GROUP BY the shared key columns (product, company, selling_method, date fields).
+2. Use FULL OUTER JOIN (or LEFT/RIGHT JOIN as appropriate) to combine the pre-aggregated CTEs.
+   Do NOT cross-join or inner-join raw fact tables — this causes fan-out duplicates.
+3. Use COALESCE to merge key columns from different sources (e.g., COALESCE(demand.KEY_PRODUCT, sales.KEY_PRODUCT)).
+4. The deduplication ROW_NUMBER() CTE should come AFTER the join of pre-aggregated sources.
+5. Each source CTE must independently aggregate its own measures (SUM, COUNT, etc.) so the
+   join produces exactly one row per composite key combination.
+"""
+
             aggregation_instructions = f"""
 IMPORTANT: This is a CDL to BL table using incremental MERGE.
 - stage_name in metadata should be "CDL to BL"
 - Use `merge_statement` (MERGE INTO ... USING ... WHEN MATCHED/NOT MATCHED)
-- Primary CDL source table: `{{{{ source_projects[0] }}}}.CDL_NovaStar.{cdl_source}`
+- Primary CDL source table(s): {', '.join(f'`{{{{{{ source_projects[0] }}}}}}.CDL_NovaStar.{s}`' for s in primary_sources)}
   (source_projects[0] = data-discovery project for CDL tables, dataset is ALWAYS CDL_NovaStar)
 - Dimension/lookup JOIN tables use `{{{{ source_projects[2] }}}}.Business_Logic.<table_name>`
   (source_projects[2] = BL project for dimension tables)
 - JOIN tables for enrichment: {join_table_list}
 - get_max_date should use MAX(CDL_LOAD_DATE) — the CDL layer's load timestamp, NOT LOAD_DATE or ADMIN_LOAD_DATE
 - source_table_names in metadata should be fully qualified: e.g., "{{{{ source_projects[0] }}}}.CDL_NovaStar.{cdl_source}"
-"""
+{multi_fact_instructions}"""
 
         # Build explicit transform instructions
         transform_instructions = []
