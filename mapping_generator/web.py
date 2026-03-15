@@ -177,26 +177,15 @@ async def generate(
             )
         requirements = result
 
-        # Resolve layer
-        resolved_layer = layer if layer else (requirements.layer or "")
-        if not resolved_layer:
-            return JSONResponse(
-                status_code=400,
-                content={"errors": ["Could not auto-detect layer. Please select a layer."]},
-            )
+        # Resolve layer — default to BL if auto-detection fails
+        resolved_layer = layer if layer else (requirements.layer or "BL")
         if resolved_layer not in LAYERS:
-            return JSONResponse(
-                status_code=400,
-                content={"errors": [f"Invalid layer: {resolved_layer}"]},
-            )
+            resolved_layer = "BL"
 
-        # Resolve source
+        # Resolve source — derive from filename if not detected
         resolved_source = source if source else (requirements.source_name or "")
         if not resolved_source:
-            return JSONResponse(
-                status_code=400,
-                content={"errors": ["Could not auto-detect source. Please enter a source name."]},
-            )
+            resolved_source = Path(input_paths[0]).stem.replace("-", "_").upper()
 
         requirements.source_name = resolved_source
         requirements.layer = resolved_layer
