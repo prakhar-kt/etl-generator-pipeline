@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pipeline Scheduler - NovaStar</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; min-height: 100vh; }
+    .header { background: #1a1a2e; color: #fff; padding: 1.5rem 2rem; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { font-size: 1.4rem; font-weight: 600; }
+    .header p { font-size: 0.85rem; color: #a0a0c0; margin-top: 0.3rem; }
+    .header-right { display: flex; gap: 0.8rem; align-items: center; }
+    .header a { color: #a0a0c0; text-decoration: none; font-size: 0.85rem; padding: 0.4rem 0.8rem; border-radius: 6px; transition: all 0.2s; }
+    .header a:hover { color: #fff; background: rgba(255,255,255,0.1); }
+    .container { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem; }
+    .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem; }
+    .card h2 { font-size: 1.1rem; margin-bottom: 1rem; color: #1a1a2e; }
+
+    /* Schedule info */
+    .schedule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+    .schedule-item { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; }
+    .schedule-item .label { font-size: 0.75rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+    .schedule-item .value { font-size: 1.1rem; font-weight: 600; color: #1a1a2e; margin-top: 0.3rem; }
+    .schedule-item .sub { font-size: 0.8rem; color: #94a3b8; margin-top: 0.15rem; }
+
+    /* Status badge */
+    .status { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 99px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+    .status.success { background: #f0fdf4; color: #166534; border: 1px solid #86efac; }
+    .status.failed { background: #fef2f2; color: #991b1b; border: 1px solid #fca5a5; }
+    .status.running { background: #eef2ff; color: #3730a3; border: 1px solid #a5b4fc; }
+
+    /* Buttons */
+    .btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1.2rem; border: none; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+    .btn-refresh { background: #8b5cf6; color: #fff; }
+    .btn-refresh:hover { background: #7c3aed; }
+    .btn-refresh:disabled { background: #c4b5fd; cursor: not-allowed; }
+    .btn-outline { background: transparent; color: #4a6cf7; border: 1px solid #4a6cf7; }
+    .btn-outline:hover { background: #eef2ff; }
+    .spinner { display: none; width: 16px; height: 16px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Live log */
+    .live-log { background: #1e1e2e; border-radius: 8px; padding: 1rem; max-height: 400px; overflow-y: auto; display: none; margin-top: 1rem; }
+    .log-entry { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.78rem; line-height: 1.8; color: #cdd6f4; }
+    .log-entry .time { color: #6c7086; }
+    .log-entry.success { color: #a6e3a1; }
+    .log-entry.failed { color: #f38ba8; }
+    .log-entry.running { color: #89b4fa; }
+
+    /* History table */
+    .history-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .history-table th { background: #f8fafc; color: #475569; font-weight: 600; padding: 0.6rem 0.8rem; text-align: left; border-bottom: 2px solid #e2e8f0; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .history-table td { padding: 0.55rem 0.8rem; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    .history-table tr:hover td { background: #f8fafc; }
+    .history-table .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.75rem; }
+    .error-detail { color: #dc2626; font-size: 0.75rem; max-width: 350px; word-break: break-word; }
+    .empty-state { text-align: center; padding: 2rem; color: #94a3b8; font-size: 0.9rem; }
+
+    /* Run group */
+    .run-group { margin-bottom: 1.5rem; }
+    .run-group-header { display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0; border-bottom: 2px solid #e2e8f0; margin-bottom: 0.5rem; cursor: pointer; }
+    .run-group-header:hover { background: #f8fafc; border-radius: 4px; padding: 0.6rem 0.5rem; }
+    .run-group-header h3 { font-size: 0.9rem; color: #1a1a2e; }
+    .run-group-header .run-meta { font-size: 0.78rem; color: #64748b; display: flex; gap: 1rem; align-items: center; }
+    .run-steps { padding-left: 0; }
+
+    /* Pagination */
+    .pagination { display: flex; justify-content: center; gap: 0.5rem; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>Pipeline Scheduler</h1>
+      <p>Daily CDL + BL refresh pipeline</p>
+    </div>
+    <div class="header-right">
+      <a href="/">Generator</a>
+      <a href="/scheduler">Scheduler</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Schedule Info -->
+    <div class="card">
+      <h2>Schedule Configuration</h2>
+      <div class="schedule-grid">
+        <div class="schedule-item">
+          <div class="label">Schedule</div>
+          <div class="value">Daily at 6:00 AM</div>
+          <div class="sub">UTC (0 6 * * *)</div>
+        </div>
+        <div class="schedule-item">
+          <div class="label">Pipeline Steps</div>
+          <div class="value">CDL + BL Refresh</div>
+          <div class="sub">RAW→CDL transforms, then all active BL MERGEs</div>
+        </div>
+        <div class="schedule-item">
+          <div class="label">Last Run</div>
+          <div class="value" id="last-run-time">Loading...</div>
+          <div class="sub" id="last-run-status"></div>
+        </div>
+        <div class="schedule-item">
+          <div class="label">Next Run</div>
+          <div class="value" id="next-run-time">Loading...</div>
+          <div class="sub" id="next-run-countdown"></div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 0.8rem; align-items: center;">
+        <button class="btn btn-refresh" id="btn-run" onclick="triggerRefresh()">
+          <span id="btn-run-text">Run Now</span>
+          <div class="spinner" id="run-spinner"></div>
+        </button>
+        <button class="btn btn-outline" onclick="loadHistory()">Reload History</button>
+      </div>
+
+      <!-- Live log -->
+      <div class="live-log" id="live-log"></div>
+    </div>
+
+    <!-- Run History -->
+    <div class="card">
+      <h2>Run History</h2>
+      <div id="history-container">
+        <div class="empty-state">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── Load history on page load ──
+    document.addEventListener('DOMContentLoaded', () => {
+      loadHistory();
+      updateNextRun();
+      setInterval(updateNextRun, 60000);
+    });
+
+    async function loadHistory() {
+      try {
+        const res = await fetch('/refresh-history?limit=50');
+        const data = await res.json();
+        renderHistory(data.runs || []);
+      } catch (e) {
+        document.getElementById('history-container').innerHTML =
+          '<div class="empty-state">Failed to load history</div>';
+      }
+    }
+
+    function renderHistory(runs) {
+      const container = document.getElementById('history-container');
+
+      if (!runs.length) {
+        container.innerHTML = '<div class="empty-state">No refresh runs yet. Click "Run Now" to trigger the first one.</div>';
+        document.getElementById('last-run-time').textContent = 'Never';
+        document.getElementById('last-run-status').textContent = '';
+        return;
+      }
+
+      // Group by run_id
+      const groups = {};
+      for (const r of runs) {
+        if (!groups[r.run_id]) groups[r.run_id] = [];
+        groups[r.run_id].push(r);
+      }
+
+      // Sort groups by most recent timestamp
+      const sortedGroups = Object.entries(groups).sort((a, b) => {
+        const ta = new Date(a[1][0].run_timestamp);
+        const tb = new Date(b[1][0].run_timestamp);
+        return tb - ta;
+      });
+
+      // Update last run info
+      if (sortedGroups.length) {
+        const lastRun = sortedGroups[0][1];
+        const ts = new Date(lastRun[0].run_timestamp);
+        document.getElementById('last-run-time').textContent = formatDate(ts);
+        const allSuccess = lastRun.every(r => r.status === 'success');
+        const hasFail = lastRun.some(r => r.status === 'failed');
+        const statusEl = document.getElementById('last-run-status');
+        if (allSuccess) {
+          statusEl.innerHTML = '<span class="status success">Success</span>';
+        } else if (hasFail) {
+          statusEl.innerHTML = '<span class="status failed">Failed</span>';
+        } else {
+          statusEl.innerHTML = '<span class="status running">Running</span>';
+        }
+      }
+
+      let html = '';
+      for (const [runId, steps] of sortedGroups) {
+        const ts = new Date(steps[0].run_timestamp);
+        const successes = steps.filter(s => s.status === 'success').length;
+        const failures = steps.filter(s => s.status === 'failed').length;
+        const totalDuration = steps.reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
+        const overallStatus = failures > 0 ? 'failed' : 'success';
+
+        html += `<div class="run-group">
+          <div class="run-group-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? '' : 'none'">
+            <h3>${formatDate(ts)}</h3>
+            <div class="run-meta">
+              <span>${successes} passed${failures ? `, ${failures} failed` : ''}</span>
+              <span>${totalDuration.toFixed(1)}s</span>
+              <span class="status ${overallStatus}">${overallStatus}</span>
+            </div>
+          </div>
+          <div class="run-steps">
+            <table class="history-table">
+              <thead>
+                <tr>
+                  <th>Step</th>
+                  <th>Table</th>
+                  <th>Status</th>
+                  <th>Rows</th>
+                  <th>Duration</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody>`;
+
+        for (const step of steps) {
+          const dur = step.duration_seconds ? step.duration_seconds.toFixed(1) + 's' : '-';
+          const rows = step.rows_affected != null ? step.rows_affected.toLocaleString() : '-';
+          const err = step.error_message
+            ? `<div class="error-detail">${escapeHtml(step.error_message.substring(0, 200))}${step.error_message.length > 200 ? '...' : ''}</div>`
+            : '-';
+
+          html += `<tr>
+            <td class="mono">${step.step}</td>
+            <td class="mono">${step.table_name || '-'}</td>
+            <td><span class="status ${step.status}">${step.status}</span></td>
+            <td>${rows}</td>
+            <td>${dur}</td>
+            <td>${err}</td>
+          </tr>`;
+        }
+
+        html += `</tbody></table></div></div>`;
+      }
+
+      container.innerHTML = html;
+    }
+
+    // ── Trigger manual refresh ──
+    async function triggerRefresh() {
+      const btn = document.getElementById('btn-run');
+      const btnText = document.getElementById('btn-run-text');
+      const spinner = document.getElementById('run-spinner');
+      const logEl = document.getElementById('live-log');
+
+      btn.disabled = true;
+      btnText.textContent = 'Running...';
+      spinner.style.display = 'inline-block';
+      logEl.style.display = 'block';
+      logEl.innerHTML = '';
+
+      try {
+        const res = await fetch('/refresh-pipeline', { method: 'POST' });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const event = JSON.parse(line.substring(6));
+              appendLog(event);
+              if (event.stage === 'done') break;
+            } catch {}
+          }
+        }
+      } catch (e) {
+        appendLog({ stage: 'error', status: 'failed', message: `Connection error: ${e.message}` });
+      }
+
+      btn.disabled = false;
+      btnText.textContent = 'Run Now';
+      spinner.style.display = 'none';
+
+      // Reload history after run
+      setTimeout(loadHistory, 1000);
+    }
+
+    function appendLog(event) {
+      const logEl = document.getElementById('live-log');
+      const time = new Date().toLocaleTimeString();
+      const cls = event.status || '';
+      let msg = event.message || '';
+      if (event.detail) msg += ` | ${event.detail.substring(0, 150)}`;
+
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${cls}`;
+      entry.innerHTML = `<span class="time">[${time}]</span> <strong>${event.stage}</strong> ${escapeHtml(msg)}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // ── Next run countdown ──
+    function updateNextRun() {
+      const now = new Date();
+      const next = new Date(now);
+      next.setUTCHours(6, 0, 0, 0);
+      if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+
+      document.getElementById('next-run-time').textContent = formatDate(next);
+
+      const diffMs = next - now;
+      const hours = Math.floor(diffMs / 3600000);
+      const mins = Math.floor((diffMs % 3600000) / 60000);
+      document.getElementById('next-run-countdown').textContent = `in ${hours}h ${mins}m`;
+    }
+
+    // ── Helpers ──
+    function formatDate(d) {
+      const date = new Date(d);
+      return date.toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+        timeZone: 'UTC'
+      }) + ' UTC';
+    }
+
+    function escapeHtml(s) {
+      const el = document.createElement('span');
+      el.textContent = s;
+      return el.innerHTML;
+    }
+  </script>
+</body>
+</html>

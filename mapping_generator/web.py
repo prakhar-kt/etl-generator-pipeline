@@ -105,6 +105,11 @@ async def index():
     return (STATIC_DIR / "index.html").read_text()
 
 
+@app.get("/scheduler", response_class=HTMLResponse)
+async def scheduler():
+    return (STATIC_DIR / "scheduler.html").read_text()
+
+
 @app.get("/bq-status")
 async def bq_status():
     client = _get_bq_client()
