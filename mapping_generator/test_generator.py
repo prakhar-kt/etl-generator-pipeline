@@ -57,61 +57,10 @@ def generate_tests(yaml_content: str, project: str) -> list[dict]:
 
     fq_table = f"`{project}.{dataset}.{target_table}`"
 
+    columns = _extract_columns_from_ddl(create_sql)
     tests = []
 
-    # 1. Duplicate check on ADMIN_COMPOSITEKEY_HASH
-    tests.append({
-        "name": "duplicate_check",
-        "description": "Check for duplicate composite key hashes",
-        "sql": f"""SELECT ADMIN_COMPOSITEKEY_HASH, COUNT(*) as cnt
-FROM {fq_table}
-WHERE ADMIN_ISDELETED = FALSE OR ADMIN_ISDELETED IS NULL
-GROUP BY ADMIN_COMPOSITEKEY_HASH
-HAVING cnt > 1
-LIMIT 5""",
-        "expected": "0_rows",
-        "severity": "error",
-    })
-
-    # 2. Null check — query INFORMATION_SCHEMA for actual columns
-    tests.append({
-        "name": "null_check",
-        "description": "Check for NULL values in all columns",
-        "sql": f"""SELECT
-  column_name,
-  (SELECT COUNTIF(col_val IS NULL) FROM UNNEST([
-    CAST({target_table}.\\`\" || column_name || \"\\` AS STRING)
-  ]) col_val) as null_count
-FROM `{project}.{dataset}.INFORMATION_SCHEMA.COLUMNS`
-WHERE table_name = '{target_table}'
--- This is a template; actual execution builds dynamic SQL""",
-        "expected": "all_zero",
-        "severity": "warning",
-        # The actual null check is done dynamically in pipeline.py
-        "_dynamic": True,
-    })
-
-    # Build a proper null-check SQL using column names from DDL
-    columns = _extract_columns_from_ddl(create_sql)
-    if columns:
-        countif_parts = []
-        for col_name, col_type in columns:
-            countif_parts.append(f"  COUNTIF({col_name} IS NULL) as {col_name}_nulls")
-        null_sql = f"SELECT\n" + ",\n".join(countif_parts) + f"\nFROM {fq_table}"
-        tests[-1]["sql"] = null_sql
-        tests[-1]["_dynamic"] = False
-        tests[-1]["_columns"] = columns
-
-    # 3. Row count check (informational)
-    tests.append({
-        "name": "row_count_check",
-        "description": "Verify table has data",
-        "sql": f"SELECT COUNT(*) as cnt FROM {fq_table}",
-        "expected": "gt_zero",
-        "severity": "error",
-    })
-
-    # 4. Schema check — verify expected columns exist
+    # 1. Schema check — verify expected columns exist (run first)
     if columns:
         expected_cols = ", ".join(f"'{c[0]}'" for c in columns)
         tests.append({
@@ -128,14 +77,51 @@ WHERE expected_col NOT IN (
             "severity": "error",
         })
 
-    # 5. Source coverage — extract source tables and check key overlap
+    # 2. Row count check
+    tests.append({
+        "name": "row_count_check",
+        "description": "Verify table has data",
+        "sql": f"SELECT COUNT(*) as cnt FROM {fq_table}",
+        "expected": "gt_zero",
+        "severity": "error",
+    })
+
+    # 3. Duplicate check on ADMIN_COMPOSITEKEY_HASH
+    tests.append({
+        "name": "duplicate_check",
+        "description": "Check for duplicate composite key hashes",
+        "sql": f"""SELECT ADMIN_COMPOSITEKEY_HASH, COUNT(*) as cnt
+FROM {fq_table}
+WHERE ADMIN_ISDELETED = FALSE OR ADMIN_ISDELETED IS NULL
+GROUP BY ADMIN_COMPOSITEKEY_HASH
+HAVING cnt > 1
+LIMIT 5""",
+        "expected": "0_rows",
+        "severity": "error",
+    })
+
+    # 4. Null check
+    if columns:
+        countif_parts = []
+        for col_name, col_type in columns:
+            countif_parts.append(f"  COUNTIF({col_name} IS NULL) as {col_name}_nulls")
+        null_sql = f"SELECT\n" + ",\n".join(countif_parts) + f"\nFROM {fq_table}"
+        tests.append({
+            "name": "null_check",
+            "description": "Check for NULL values in all columns",
+            "sql": null_sql,
+            "expected": "all_zero",
+            "severity": "warning",
+            "_columns": columns,
+        })
+
+    # 5. Source coverage
     source_tables = _extract_source_tables(mapping, project)
     if source_tables:
-        # Find common key columns between source and target
-        for src_fq, src_name in source_tables[:2]:  # limit to first 2 sources
+        for src_fq, src_name in source_tables[:2]:
             tests.append({
                 "name": f"source_coverage_{src_name}",
-                "description": f"Check key coverage from {src_name}",
+                "description": f"Check row coverage from {src_name}",
                 "sql": f"""SELECT
   (SELECT COUNT(*) FROM {src_fq}) as source_rows,
   (SELECT COUNT(*) FROM {fq_table}) as target_rows""",

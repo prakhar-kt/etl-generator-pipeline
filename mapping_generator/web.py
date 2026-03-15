@@ -3,18 +3,21 @@
 import json
 import os
 import tempfile
+import uuid
 from dataclasses import asdict
 from pathlib import Path
 
 import yaml
 from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from .cli import GENERATORS, _classify_input, _parse_inputs
 from .config import LAYERS, MAPPINGS_ROOT
-from .pipeline import run_pipeline
-from .sql_utils import cleanup_sql, ensure_datasets, extract_dataset_name, prepare_merge_sql, replace_placeholders
+from .pipeline import (
+    PipelineEvent, ensure_artifacts_table, ensure_datasets, extract_dataset_name,
+    run_execute, run_preview, run_tests, store_artifact,
+)
+from .sql_utils import cleanup_sql, prepare_merge_sql, replace_placeholders
 from .validator import MappingValidator
 
 app = FastAPI(title="Smart DTC Mapping Generator")
@@ -33,15 +36,11 @@ def _get_bq_client():
 
 
 def _check_existing_yaml(requirements, source_name: str) -> list[dict] | None:
-    """Check if YAML already exists in pipeline_artifacts for the target tables.
-
-    Returns a list of file dicts if found, None otherwise.
-    """
+    """Check if YAML already exists in pipeline_artifacts for the target tables."""
     client = _get_bq_client()
     if not client:
         return None
 
-    # Collect target table names from requirements
     target_tables = []
     for tm in requirements.table_mappings:
         tbl = tm.target_table or requirements.metadata.get("input_filename", "")
@@ -51,20 +50,17 @@ def _check_existing_yaml(requirements, source_name: str) -> list[dict] | None:
         return None
 
     try:
-        # Look for the latest version of each target table with status passed or executed
         placeholders = ", ".join(f"'{t}'" for t in target_tables)
         sql = f"""SELECT target_table, filename, yaml_content, version, status
                   FROM `{client.project}.Business_Logic.pipeline_artifacts`
                   WHERE target_table IN ({placeholders})
-                    AND status IN ('passed', 'executed')
+                    AND status IN ('passed', 'executed', 'generated')
                   QUALIFY ROW_NUMBER() OVER (PARTITION BY target_table ORDER BY version DESC) = 1"""
         job = client.query(sql)
         rows = list(job.result())
-
         if not rows:
             return None
 
-        # Build file list from stored artifacts
         output_files = []
         found_tables = set()
         for row in rows:
@@ -76,12 +72,27 @@ def _check_existing_yaml(requirements, source_name: str) -> list[dict] | None:
                 "validation_errors": [],
             })
 
-        # Only return cached results if ALL target tables were found
         if set(target_tables) <= found_tables:
             return output_files
         return None
     except Exception:
         return None
+
+
+def _store_yaml_in_bq(filename: str, target_table: str, yaml_content: str):
+    """Store generated YAML in pipeline_artifacts."""
+    client = _get_bq_client()
+    if not client:
+        return
+    try:
+        project = client.project
+        ensure_datasets(client, project)
+        ensure_artifacts_table(client, project)
+        artifact_id = str(uuid.uuid4())
+        store_artifact(client, project, artifact_id, filename, target_table,
+                       yaml_content, 1, "generated")
+    except Exception:
+        pass  # non-critical
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -91,101 +102,10 @@ async def index():
 
 @app.get("/bq-status")
 async def bq_status():
-    """Check if BigQuery is available."""
     client = _get_bq_client()
     if client:
         return {"available": True, "project": client.project}
     return {"available": False, "project": None}
-
-
-@app.post("/execute-bl")
-async def execute_bl(
-    yaml_content: str = Form(""),
-    project_id: str = Form(""),
-):
-    """Execute BL SQL (CREATE TABLE + MERGE/INSERT) against BigQuery."""
-    client = _get_bq_client()
-    if not client:
-        return JSONResponse(
-            status_code=400,
-            content={"errors": ["BigQuery not available. Set GCP_PROJECT_ID and ensure google-cloud-bigquery is installed."]},
-        )
-
-    if not yaml_content:
-        return JSONResponse(
-            status_code=400,
-            content={"errors": ["No YAML content provided."]},
-        )
-
-    # Override project if provided
-    if project_id:
-        from google.cloud import bigquery
-        client = bigquery.Client(project=project_id)
-
-    try:
-        mapping = yaml.safe_load(yaml_content)
-    except yaml.YAMLError as e:
-        return JSONResponse(
-            status_code=400,
-            content={"errors": [f"Invalid YAML: {e}"]},
-        )
-
-    results = []
-    errors = []
-
-    # Extract target dataset name
-    create_sql_raw = mapping.get("create_table", "")
-    dataset_name = extract_dataset_name(create_sql_raw) if create_sql_raw else "Business_Logic"
-
-    # Ensure all required datasets exist
-    created = ensure_datasets(client, client.project, dataset_name)
-    for ds in created:
-        results.append({"step": "create_dataset", "status": "success", "message": f"Created dataset {ds}"})
-
-    project = client.project
-
-    # Step 1: Execute CREATE TABLE
-    create_sql = mapping.get("create_table", "")
-    if create_sql:
-        create_sql = cleanup_sql(replace_placeholders(create_sql, project, dataset_name))
-        try:
-            job = client.query(create_sql)
-            job.result()
-            results.append({"step": "create_table", "status": "success", "message": "Table created/verified"})
-        except Exception as e:
-            errors.append(f"CREATE TABLE failed: {e}")
-            results.append({"step": "create_table", "status": "error", "message": str(e)})
-
-    # Step 2: Execute MERGE or other_statement
-    merge_sql = mapping.get("merge_statement", "") or mapping.get("other_statement", "")
-    if merge_sql:
-        merge_sql = cleanup_sql(replace_placeholders(merge_sql, project, dataset_name))
-        merge_sql = prepare_merge_sql(merge_sql)
-
-        try:
-            job = client.query(merge_sql)
-            job.result()
-            affected = job.num_dml_affected_rows
-            msg = "SQL executed successfully"
-            if affected is not None:
-                msg += f" ({affected:,} rows affected)"
-            results.append({"step": "merge/insert", "status": "success", "message": msg})
-        except Exception as e:
-            errors.append(f"MERGE/INSERT failed: {e}")
-            results.append({"step": "merge/insert", "status": "error", "message": str(e)})
-
-    # Step 3: Get row count
-    target_table = mapping.get("metadata", {}).get("target_table_name", "")
-    if target_table and not errors:
-        try:
-            count_sql = f"SELECT COUNT(*) as cnt FROM `{project}.Business_Logic.{target_table}`"
-            job = client.query(count_sql)
-            row = list(job.result())[0]
-            results.append({"step": "verify", "status": "success", "message": f"Table has {row.cnt:,} rows"})
-        except Exception:
-            pass  # Non-critical
-
-    return {"results": results, "errors": errors}
 
 
 @app.post("/execute-pipeline")
@@ -194,57 +114,91 @@ async def execute_pipeline(
     filename: str = Form(""),
     project_id: str = Form(""),
 ):
-    """Execute the full self-healing pipeline with SSE streaming."""
+    """Execute SQL from YAML with self-healing retry. SSE stream."""
     client = _get_bq_client()
     if not client:
-        return JSONResponse(
-            status_code=400,
-            content={"errors": ["BigQuery not available."]},
-        )
-
+        return JSONResponse(status_code=400, content={"errors": ["BigQuery not available."]})
     if not yaml_content:
-        return JSONResponse(
-            status_code=400,
-            content={"errors": ["No YAML content provided."]},
-        )
-
+        return JSONResponse(status_code=400, content={"errors": ["No YAML content provided."]})
     if project_id:
         from google.cloud import bigquery
         client = bigquery.Client(project=project_id)
 
     async def event_stream():
         try:
-            async for event in run_pipeline(yaml_content, filename, project_id or client.project, client):
-                data = asdict(event)
-                yield f"data: {json.dumps(data, default=str)}\n\n"
+            async for event in run_execute(yaml_content, filename, project_id or client.project, client):
+                yield f"data: {json.dumps(asdict(event), default=str)}\n\n"
         except Exception as e:
-            error_event = {
-                "stage": "execute",
-                "status": "failed",
-                "message": f"Pipeline error: {str(e)}",
-                "detail": str(e),
-            }
-            yield f"data: {json.dumps(error_event)}\n\n"
-        yield "data: {\"stage\": \"done\", \"status\": \"done\", \"message\": \"Pipeline complete\"}\n\n"
+            yield f"data: {json.dumps({'stage': 'execute', 'status': 'failed', 'message': str(e)})}\n\n"
+        yield "data: {\"stage\": \"done\", \"status\": \"done\", \"message\": \"Complete\"}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/preview-table")
+async def preview_table(
+    target_table: str = Form(""),
+    project_id: str = Form(""),
+):
+    """Return top 10 rows from a BQ table."""
+    client = _get_bq_client()
+    if not client:
+        return JSONResponse(status_code=400, content={"errors": ["BigQuery not available."]})
+    if project_id:
+        from google.cloud import bigquery
+        client = bigquery.Client(project=project_id)
+    try:
+        rows = await run_preview(target_table, project_id or client.project, client)
+        # Convert non-serializable types
+        clean_rows = []
+        for row in rows:
+            clean = {}
+            for k, v in row.items():
+                clean[k] = str(v) if not isinstance(v, (str, int, float, bool, type(None))) else v
+            clean_rows.append(clean)
+        return {"rows": clean_rows, "count": len(clean_rows)}
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"errors": [str(e)]})
+
+
+@app.post("/run-tests")
+async def run_tests_endpoint(
+    yaml_content: str = Form(""),
+    project_id: str = Form(""),
+):
+    """Run DQ tests one by one with per-test self-healing. SSE stream."""
+    client = _get_bq_client()
+    if not client:
+        return JSONResponse(status_code=400, content={"errors": ["BigQuery not available."]})
+    if not yaml_content:
+        return JSONResponse(status_code=400, content={"errors": ["No YAML content provided."]})
+    if project_id:
+        from google.cloud import bigquery
+        client = bigquery.Client(project=project_id)
+
+    async def event_stream():
+        try:
+            async for event in run_tests(yaml_content, project_id or client.project, client):
+                yield f"data: {json.dumps(asdict(event), default=str)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'stage': 'test', 'status': 'failed', 'message': str(e)})}\n\n"
+        yield "data: {\"stage\": \"done\", \"status\": \"done\", \"message\": \"Complete\"}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.get("/pipeline-history")
 async def pipeline_history(target_table: str = ""):
-    """Retrieve past pipeline runs from BQ pipeline_artifacts table."""
     client = _get_bq_client()
     if not client:
         return {"runs": []}
-
     try:
         where = f"WHERE target_table = '{target_table}'" if target_table else ""
         sql = f"""SELECT artifact_id, filename, target_table, version, status,
                          error_message, attempt_number, created_at, updated_at
                   FROM `{client.project}.Business_Logic.pipeline_artifacts`
                   {where}
-                  ORDER BY created_at DESC
-                  LIMIT 50"""
+                  ORDER BY created_at DESC LIMIT 50"""
         job = client.query(sql)
         rows = [dict(r.items()) for r in job.result()]
         return {"runs": rows}
@@ -260,12 +214,9 @@ async def generate(
     source: str = Form(""),
 ):
     if not csv_file and not pdf_file:
-        return JSONResponse(
-            status_code=400,
-            content={"errors": ["Please upload at least one file (CSV/Excel or PDF)."]},
-        )
+        return JSONResponse(status_code=400,
+                            content={"errors": ["Please upload at least one file (CSV/Excel or PDF)."]})
 
-    # Save uploaded files to temp directory
     tmp_dir = tempfile.mkdtemp(prefix="mapping_gen_")
     input_paths: list[str] = []
 
@@ -276,30 +227,22 @@ async def generate(
                 dest.write_bytes(await upload.read())
                 input_paths.append(str(dest))
 
-        # Validate file types
         for p in input_paths:
             kind = _classify_input(Path(p))
             if kind is None:
-                return JSONResponse(
-                    status_code=400,
-                    content={"errors": [f"Unsupported file format: {Path(p).suffix}"]},
-                )
+                return JSONResponse(status_code=400,
+                                    content={"errors": [f"Unsupported file format: {Path(p).suffix}"]})
 
-        # Parse inputs
         result = _parse_inputs(input_paths, api_key=None)
         if isinstance(result, int):
-            return JSONResponse(
-                status_code=400,
-                content={"errors": ["Failed to parse input files. Check file format and content."]},
-            )
+            return JSONResponse(status_code=400,
+                                content={"errors": ["Failed to parse input files."]})
         requirements = result
 
-        # Resolve layer — default to BL if auto-detection fails
         resolved_layer = layer if layer else (requirements.layer or "BL")
         if resolved_layer not in LAYERS:
             resolved_layer = "BL"
 
-        # Resolve source — derive from filename if not detected
         resolved_source = source if source else (requirements.source_name or "")
         if not resolved_source:
             resolved_source = Path(input_paths[0]).stem.replace("-", "_").upper()
@@ -310,10 +253,10 @@ async def generate(
             "input_filename", Path(input_paths[0]).stem
         )
 
-        # Check if YAML already exists in BQ for these target tables
-        existing_files = _check_existing_yaml(requirements, resolved_source)
-        if existing_files:
-            return {"files": existing_files, "errors": [], "from_cache": True}
+        # Check cache first
+        existing = _check_existing_yaml(requirements, resolved_source)
+        if existing:
+            return {"files": existing, "errors": [], "from_cache": True}
 
         # Generate via LLM
         generator_cls = GENERATORS[resolved_layer]
@@ -321,18 +264,27 @@ async def generate(
         files = generator.generate(requirements)
 
         if not files:
-            return JSONResponse(
-                status_code=500,
-                content={"errors": ["No files were generated. The LLM may have returned invalid output."]},
-            )
+            return JSONResponse(status_code=500,
+                                content={"errors": ["No files were generated."]})
 
-        # Validate and build response
+        # Validate, store, and build response
         validator = MappingValidator()
         output_files = []
         for fn, content in files.items():
             errors = validator.validate(content, resolved_layer)
             warnings = [str(e) for e in errors if e.severity == "warning"]
             errs = [str(e) for e in errors if e.severity == "error"]
+
+            # Extract target table for storage
+            try:
+                safe = yaml.safe_load(content.replace("{{", "X").replace("}}", "X")) or {}
+                tgt = safe.get("metadata", {}).get("target_table_name", "").split(".")[-1]
+            except Exception:
+                tgt = fn.replace(".yml", "")
+
+            # Store in BQ
+            _store_yaml_in_bq(fn, tgt, content)
+
             output_files.append({
                 "filename": fn,
                 "content": content,
@@ -343,11 +295,8 @@ async def generate(
         return {"files": output_files, "errors": []}
 
     except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"errors": [f"Generation failed: {str(e)}"]},
-        )
+        return JSONResponse(status_code=500,
+                            content={"errors": [f"Generation failed: {str(e)}"]})
     finally:
-        # Clean up temp files
         import shutil
         shutil.rmtree(tmp_dir, ignore_errors=True)
