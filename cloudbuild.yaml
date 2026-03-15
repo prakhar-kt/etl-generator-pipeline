@@ -26,7 +26,7 @@ steps:
       - '--memory'
       - '1Gi'
       - '--timeout'
-      - '300'
+      - '900'
       - '--allow-unauthenticated'
       - '--set-env-vars'
       - 'GCP_PROJECT_ID=$PROJECT_ID,LLM_PROVIDER=anthropic'
