@@ -51,11 +51,16 @@ def _check_existing_yaml(requirements, source_name: str) -> list[dict] | None:
 
     try:
         placeholders = ", ".join(f"'{t}'" for t in target_tables)
+        # Pick latest version, preferring passed > executed > testing > generated
         sql = f"""SELECT target_table, filename, yaml_content, version, status
                   FROM `{client.project}.Business_Logic.pipeline_artifacts`
                   WHERE target_table IN ({placeholders})
-                    AND status IN ('passed', 'executed', 'generated')
-                  QUALIFY ROW_NUMBER() OVER (PARTITION BY target_table ORDER BY version DESC) = 1"""
+                  QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY target_table
+                    ORDER BY
+                      CASE status WHEN 'passed' THEN 1 WHEN 'executed' THEN 2 WHEN 'testing' THEN 3 WHEN 'generated' THEN 4 ELSE 5 END,
+                      version DESC
+                  ) = 1"""
         job = client.query(sql)
         rows = list(job.result())
         if not rows:
@@ -164,6 +169,7 @@ async def preview_table(
 @app.post("/run-tests")
 async def run_tests_endpoint(
     yaml_content: str = Form(""),
+    filename: str = Form(""),
     project_id: str = Form(""),
 ):
     """Run DQ tests one by one with per-test self-healing. SSE stream."""
@@ -178,7 +184,7 @@ async def run_tests_endpoint(
 
     async def event_stream():
         try:
-            async for event in run_tests(yaml_content, project_id or client.project, client):
+            async for event in run_tests(yaml_content, project_id or client.project, client, filename):
                 yield f"data: {json.dumps(asdict(event), default=str)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'stage': 'test', 'status': 'failed', 'message': str(e)})}\n\n"

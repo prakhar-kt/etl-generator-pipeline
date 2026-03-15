@@ -91,6 +91,23 @@ def update_artifact(client, project: str, artifact_id: str, version: int, **fiel
     job.result()
 
 
+def upsert_latest_yaml(client, project: str, target_table: str, filename: str,
+                       yaml_content: str, new_version: int, status: str):
+    """Store a new version of YAML for a target table, archiving the old one.
+
+    Inserts a new row with the incremented version. The _check_existing_yaml
+    query uses QUALIFY ROW_NUMBER() ORDER BY version DESC to always pick the latest.
+    """
+    import uuid
+    artifact_id = str(uuid.uuid4())
+    try:
+        store_artifact(client, project, artifact_id, filename, target_table,
+                       yaml_content, new_version, status)
+        logger.info(f"Stored YAML v{new_version} for {target_table} (status={status})")
+    except Exception as e:
+        logger.error(f"Failed to upsert YAML for {target_table}: {e}")
+
+
 def _esc(s: str) -> str:
     """Escape single quotes for BQ SQL strings."""
     return s.replace("\\", "\\\\").replace("'", "\\'") if s else ""
@@ -248,6 +265,11 @@ async def run_execute(
         )
 
         if ok:
+            # Store the successful YAML version
+            await asyncio.to_thread(
+                upsert_latest_yaml, bq_client, project, target_table,
+                filename, current_yaml, version, "executed"
+            )
             yield PipelineEvent(stage="execute", status="success",
                                 message="SQL executed successfully",
                                 attempt=attempt, version=version,
@@ -313,10 +335,12 @@ async def run_tests(
     yaml_content: str,
     project_id: str,
     bq_client,
+    filename: str = "",
 ) -> AsyncGenerator[PipelineEvent, None]:
     """Run DQ tests one by one. Each test retries up to 3 times via LLM fix."""
     project = bq_client.project or project_id
     current_yaml = yaml_content
+    version = 1
 
     try:
         tests = generate_tests(current_yaml, project)
@@ -338,6 +362,7 @@ async def run_tests(
 
     mapping = yaml.safe_load(re.sub(r'\{\{[^}]*\}\}', 'X', current_yaml)) or {}
     dataset_name = extract_dataset_name(mapping.get("create_table", ""))
+    target_table = mapping.get("metadata", {}).get("target_table_name", "").split(".")[-1]
 
     all_results = []
 
@@ -397,13 +422,18 @@ async def run_tests(
                         current_test["sql"]
                     )
                     if fix.get("yaml"):
-                        # Store lesson: test failure fixed by YAML change
+                        # Store lesson and persist fixed YAML
                         await asyncio.to_thread(
                             store_lesson, error_ctx[:500],
                             f"Fixed {test['name']} by modifying YAML SQL on attempt {attempt}",
                             f"test_{test['name']}"
                         )
+                        version += 1
                         current_yaml = fix["yaml"]
+                        await asyncio.to_thread(
+                            upsert_latest_yaml, bq_client, project, target_table,
+                            filename, current_yaml, version, "testing"
+                        )
                         # Re-execute YAML then re-run test
                         ok, err = await asyncio.to_thread(
                             _execute_yaml_sql, bq_client, current_yaml, project, dataset_name
@@ -452,7 +482,11 @@ async def run_tests(
         if not test_passed:
             return
 
-    # All tests passed
+    # All tests passed — persist final YAML as "passed"
+    await asyncio.to_thread(
+        upsert_latest_yaml, bq_client, project, target_table,
+        filename, current_yaml, version, "passed"
+    )
     yield PipelineEvent(stage="test", status="success",
                         message=f"All {len(all_results)} tests passed",
                         test_results=all_results)

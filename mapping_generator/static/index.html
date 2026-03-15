@@ -316,6 +316,7 @@ async function runUnitTests(i) {
 
   const fd = new FormData();
   fd.append('yaml_content', generatedFiles[i].content);
+  fd.append('filename', generatedFiles[i].filename);
   fd.append('project_id', bqProject);
 
   let testNodesCreated = false;
