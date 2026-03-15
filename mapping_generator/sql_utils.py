@@ -43,11 +43,27 @@ def replace_placeholders(sql: str, project: str, dataset_name: str = "Business_L
     # Fix ADMIN_ROW_HASH: TO_JSON_STRING(src/SOURCE) doesn't work in BQ MERGE
     sql = re.sub(r'FARM_FINGERPRINT\(TO_JSON_STRING\([^)]*\)\)', '0', sql)
 
-    # Fix bare `src` table references — LLM sometimes uses src as a STRUCT/alias
-    # that BQ tries to resolve as a table. Remove backtick-quoted `src` references.
-    sql = re.sub(r'`src`', 'src', sql)
-    # Also fix FROM src patterns that aren't part of a CTE
-    sql = re.sub(r'FROM\s+src\s*\)', 'FROM src_data)', sql)
+    # Fix reserved words used as CTE/alias names — BQ treats them as table refs
+    # Common offenders: src, final, source, target, data, result
+    reserved_aliases = {
+        'src': 'src_cte',
+        'final': 'final_cte',
+        'source': 'source_cte',
+        'result': 'result_cte',
+        'data': 'data_cte',
+    }
+    for bad, good in reserved_aliases.items():
+        # Replace backtick-quoted versions
+        sql = sql.replace(f'`{bad}`', good)
+        # Replace CTE definition: bad AS ( → good AS (
+        sql = re.sub(rf'\b{bad}\s+AS\s*\(', f'{good} AS (', sql, flags=re.IGNORECASE)
+        # Replace CTE definition after ): ) bad AS → ) good AS
+        sql = re.sub(rf'\)\s*,?\s*{bad}\s+AS\b', f'), {good} AS', sql, flags=re.IGNORECASE)
+        # Replace references: FROM final → FROM final_cte, JOIN final → JOIN final_cte
+        sql = re.sub(rf'\bFROM\s+{bad}\b', f'FROM {good}', sql, flags=re.IGNORECASE)
+        sql = re.sub(rf'\bJOIN\s+{bad}\b', f'JOIN {good}', sql, flags=re.IGNORECASE)
+        # Replace alias references: final.column → final_cte.column
+        sql = re.sub(rf'\b{bad}\.(\w)', rf'{good}.\1', sql)
 
     return sql
 

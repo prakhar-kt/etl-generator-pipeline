@@ -111,8 +111,8 @@ BASELINE_LESSONS = [
         "rule": "Never use 'GBQ Project.Dataset' as a placeholder. Use {{ source_projects[0] }}.CDL_NovaStar.<table> for CDL tables.",
     },
     {
-        "error_pattern": "must be qualified with a dataset.*src",
-        "rule": "Do NOT create a STRUCT alias named 'src'. Do NOT use `src` as a table alias or reference. For ADMIN_ROW_HASH, use 0 instead of FARM_FINGERPRINT(TO_JSON_STRING(src)).",
+        "error_pattern": "must be qualified with a dataset",
+        "rule": "Do NOT use reserved words as CTE or alias names. Avoid: src, final, source, target, result, data. Use descriptive names like base_demand, deduped_data, final_output instead.",
     },
     {
         "error_pattern": "NULL.*FULL OUTER JOIN|NULLs found",
