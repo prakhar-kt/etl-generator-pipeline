@@ -171,7 +171,9 @@
 
       try {
         const resp = await fetch('/generate', { method: 'POST', body: formData });
-        const data = await resp.json();
+        const text = await resp.text();
+        let data;
+        try { data = JSON.parse(text); } catch { showError('Server error: ' + text.slice(0, 200)); return; }
 
         if (data.errors && data.errors.length > 0) {
           showError(data.errors.join('<br>'));
@@ -246,7 +248,9 @@
         formData.append('project_id', bqProject);
 
         const resp = await fetch('/execute-bl', { method: 'POST', body: formData });
-        const data = await resp.json();
+        const text = await resp.text();
+        let data;
+        try { data = JSON.parse(text); } catch { resultsDiv.innerHTML = '<div class="error-box" style="font-size:0.8rem;">Server error: ' + escapeHtml(text.slice(0, 300)) + '</div>'; return; }
 
         if (data.errors && data.errors.length > 0) {
           resultsDiv.innerHTML = '<div class="error-box" style="font-size:0.8rem;">' + data.errors.join('<br>') + '</div>';
