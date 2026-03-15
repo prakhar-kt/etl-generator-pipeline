@@ -15,7 +15,7 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 # Anthropic configuration (fallback)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = "claude-sonnet-4-6-20250514"
+CLAUDE_MODEL = "claude-sonnet-4-6"
 
 MAX_TOKENS = 8192
 
