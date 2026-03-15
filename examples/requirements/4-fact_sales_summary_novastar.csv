@@ -1,0 +1,26 @@
+DATABASE FIELD,,,,,,,LOGIC,,,CLASSIFICATION & SECURITY,,,,,
+#,Field Name,Field Name Confirmed?,Field Type,Schema,Data Set,Table,cdl_fact_sales,cdl_dim_product,cdl_dim_company,Pseudo Logic,Default Value,Business Area,Data Classification,PII?,Comments / Notes
+ID,Field description,,Field type,GBQ Project,Dataset,Table name,CDL Sales Fact,CDL Product Dimension,CDL Company Dimension,Transformation logic,Default if NULL,Business area,Classification,PII flag,Notes
+,KEY_CALENDAR,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_sales_summary,KEY_CALENDAR,,,FARM_FINGERPRINT(CAST(TRANSACTION_DATE AS STRING)),,,Sales,Internal Only,FALSE
+,KEY_PRODUCT,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_sales_summary,KEY_PRODUCT,KEY_PRODUCT,,KEY_PRODUCT from cdl_fact_sales joined to cdl_dim_product,,,Sales,Internal Only,FALSE
+,KEY_COMPANY,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_sales_summary,KEY_COMPANY,,KEY_COMPANY,KEY_COMPANY from cdl_fact_sales joined to cdl_dim_company,,,Sales,Internal Only,FALSE
+,KEY_CUSTOMER,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_sales_summary,KEY_CUSTOMER,,,KEY_CUSTOMER from cdl_fact_sales,,,Sales,Internal Only,FALSE
+,KEY_SELLING_METHOD,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_sales_summary,KEY_SELLING_METHOD,,,KEY_SELLING_METHOD from cdl_fact_sales,,,Sales,Internal Only,FALSE
+,TRANSACTION_DATE,Y,DATE,m-mapping-gen-2026,Business_Logic,fact_sales_summary,TRANSACTION_DATE,,,Direct mapping from cdl_fact_sales,,,Sales,Internal Only,FALSE
+,TRANSACTION_YEAR,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_sales_summary,TRANSACTION_DATE,,,EXTRACT(YEAR FROM TRANSACTION_DATE),,,Sales,Internal Only,FALSE
+,TRANSACTION_MONTH,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_sales_summary,TRANSACTION_DATE,,,EXTRACT(MONTH FROM TRANSACTION_DATE),,,Sales,Internal Only,FALSE
+,COMPANY_CODE,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_sales_summary,COMPANY_CODE,,COMPANY_CODE,Direct mapping from cdl_fact_sales,,,Sales,Internal Only,FALSE
+,COMPANY_NAME,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_sales_summary,,COMPANY_NAME,COMPANY_NAME,Lookup from cdl_dim_company via KEY_COMPANY,,,Sales,Internal Only,FALSE
+,SELLING_METHOD_CODE,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_sales_summary,SELLING_METHOD_CODE,,,Direct mapping from cdl_fact_sales,,,Sales,Internal Only,FALSE
+,TOY_NO,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_sales_summary,TOY_NO,TOY_NO,,Direct mapping from cdl_fact_sales,,,Sales,Internal Only,FALSE
+,PRODUCT_NAME,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_sales_summary,,PRODUCT_NAME,,Lookup from cdl_dim_product via KEY_PRODUCT,,,Sales,Internal Only,FALSE
+,CATEGORY,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_sales_summary,,CATEGORY,,Lookup from cdl_dim_product via KEY_PRODUCT,,,Sales,Internal Only,FALSE
+,BRAND,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_sales_summary,,BRAND,,Lookup from cdl_dim_product via KEY_PRODUCT,,,Sales,Internal Only,FALSE
+,CUSTOMER_CODE,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_sales_summary,CUSTOMER_CODE,,,Direct mapping from cdl_fact_sales,,,Sales,Internal Only,FALSE
+,CURRENCY_CODE,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_sales_summary,CURRENCY_CODE,,,Direct mapping from cdl_fact_sales,,,Sales,Internal Only,FALSE
+,TOTAL_ORDER_QTY,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_sales_summary,SUM(ORDER_QTY),,,Sum of ORDER_QTY grouped by key dimensions,0,Sales,Internal Only,FALSE,
+,TOTAL_ORDER_VALUE,Y,NUMERIC,m-mapping-gen-2026,Business_Logic,fact_sales_summary,SUM(ORDER_VALUE),,,Sum of ORDER_VALUE grouped by key dimensions,0,Sales,Internal Only,FALSE,
+,TOTAL_LIST_VALUE,Y,NUMERIC,m-mapping-gen-2026,Business_Logic,fact_sales_summary,SUM(ORDER_LIST_VALUE),,,Sum of ORDER_LIST_VALUE grouped by key dimensions,0,Sales,Internal Only,FALSE,
+,AVG_SELLING_PRICE,Y,NUMERIC,m-mapping-gen-2026,Business_Logic,fact_sales_summary,"SAFE_DIVIDE(SUM(ORDER_VALUE), SUM(ORDER_QTY))",,,Average selling price = total value / total qty,0,Sales,Internal Only,FALSE,
+,AVG_DISCOUNT_PCT,Y,NUMERIC,m-mapping-gen-2026,Business_Logic,fact_sales_summary,AVG(DISCOUNT_PCT),,,Average discount percentage across orders,0,Sales,Internal Only,FALSE,
+,ORDER_COUNT,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_sales_summary,COUNT(DISTINCT ORDER_ID),,,Count of distinct orders,0,Sales,Internal Only,FALSE,

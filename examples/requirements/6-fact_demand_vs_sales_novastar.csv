@@ -1,0 +1,28 @@
+DATABASE FIELD,,,,,,,LOGIC,,,,,,CLASSIFICATION & SECURITY,,,,
+#,Field Name,Field Name Confirmed?,Field Type,Schema,Data Set,Table,cdl_fact_demand_forecast,cdl_fact_sales_forecast,cdl_fact_sales,cdl_dim_product,cdl_dim_company,Pseudo Logic,Default Value,Business Area,Data Classification,PII?,Comments / Notes
+ID,Field description,,Field type,GBQ Project,Dataset,Table name,Demand Forecast,Sales Forecast,Actual Sales,Product Dim,Company Dim,Transformation logic,Default if NULL,Business area,Classification,PII flag,Notes
+,KEY_PRODUCT,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,KEY_PRODUCT,KEY_PRODUCT,KEY_PRODUCT,KEY_PRODUCT,,FARM_FINGERPRINT(TOY_NO),,,Planning,Internal Only,FALSE
+,KEY_COMPANY,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,KEY_COMPANY,KEY_COMPANY,KEY_COMPANY,,KEY_COMPANY,KEY_COMPANY from source facts,,,Planning,Internal Only,FALSE
+,KEY_SELLING_METHOD,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,KEY_SELLING_METHOD,KEY_SELLING_METHOD,KEY_SELLING_METHOD,,,KEY_SELLING_METHOD from source facts,,,Planning,Internal Only,FALSE
+,AS_OF_DATE,Y,DATE,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,AS_OF_DATE,AS_OF_DATE,,,,Date of the forecast snapshot,,,Planning,Internal Only,FALSE
+,FORECAST_DATE,Y,DATE,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,FORECAST_DATE,FORECAST_DATE,,,,The date being forecasted,,,Planning,Internal Only,FALSE
+,FORECAST_YEAR,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,,EXTRACT(YEAR FROM FORECAST_DATE),,,Planning,Internal Only,FALSE
+,FORECAST_MONTH,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,,EXTRACT(MONTH FROM FORECAST_DATE),,,Planning,Internal Only,FALSE
+,TOY_NO,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,TOY_NO,TOY_NO,TOY_NO,TOY_NO,,Direct mapping,,,Planning,Internal Only,FALSE
+,PRODUCT_NAME,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,PRODUCT_NAME,,Lookup from cdl_dim_product,,,Planning,Internal Only,FALSE
+,CATEGORY,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,CATEGORY,,Lookup from cdl_dim_product,,,Planning,Internal Only,FALSE
+,BRAND,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,BRAND,,Lookup from cdl_dim_product,,,Planning,Internal Only,FALSE
+,COMPANY_CODE,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,COMPANY_CODE,COMPANY_CODE,COMPANY_CODE,,COMPANY_CODE,Direct from source,,,Planning,Internal Only,FALSE
+,COMPANY_NAME,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,COMPANY_NAME,Lookup from cdl_dim_company,,,Planning,Internal Only,FALSE
+,SELLING_METHOD_CODE,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,SELLING_METHOD_CODE,SELLING_METHOD_CODE,SELLING_METHOD_CODE,,,Direct from source,,,Planning,Internal Only,FALSE
+,CURRENCY_CODE,Y,STRING,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,CURRENCY_CODE,CURRENCY_CODE,CURRENCY_CODE,,,Direct from source,,,Planning,Internal Only,FALSE
+,DEMAND_PLAN_QTY,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,SUM(DEMAND_PLAN_QTY),,,,,"Sum of DEMAND_PLAN_QTY from cdl_fact_demand_forecast, grouped by product/company/selling_method/forecast_date",0,Planning,Internal Only,FALSE,
+,DEMAND_PLAN_DRAFT_QTY,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,SUM(DEMAND_PLAN_DRAFT_QTY),,,,,Sum of DEMAND_PLAN_DRAFT_QTY from cdl_fact_demand_forecast,0,Planning,Internal Only,FALSE,
+,SALES_FORECAST_QTY,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,SUM(SALES_FORECAST_QTY),,,,Sum of SALES_FORECAST_QTY from cdl_fact_sales_forecast,0,Planning,Internal Only,FALSE,
+,SALES_FORECAST_STAGED_QTY,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,SUM(SALES_FORECAST_STAGED_QTY),,,,Sum of SALES_FORECAST_STAGED_QTY from cdl_fact_sales_forecast,0,Planning,Internal Only,FALSE,
+,ACTUAL_SALES_QTY,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,SUM(ORDER_QTY),,,Sum of ORDER_QTY from cdl_fact_sales where TRANSACTION_DATE matches FORECAST_DATE month,0,Planning,Internal Only,FALSE,
+,ACTUAL_SALES_VALUE,Y,NUMERIC,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,SUM(ORDER_VALUE),,,Sum of ORDER_VALUE from cdl_fact_sales where TRANSACTION_DATE matches FORECAST_DATE month,0,Planning,Internal Only,FALSE,
+,DEMAND_VS_ACTUAL_VARIANCE,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,,DEMAND_PLAN_QTY - ACTUAL_SALES_QTY,0,Planning,Internal Only,FALSE,Calculated field
+,FORECAST_VS_ACTUAL_VARIANCE,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,,SALES_FORECAST_QTY - ACTUAL_SALES_QTY,0,Planning,Internal Only,FALSE,Calculated field
+,DEMAND_ACCURACY_PCT,Y,NUMERIC,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,,SAFE_DIVIDE(ACTUAL_SALES_QTY * 100.0 DEMAND_PLAN_QTY),0,Planning,Internal Only,FALSE,Calculated: actual/forecast * 100
+,FORECAST_ACCURACY_PCT,Y,NUMERIC,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,,SAFE_DIVIDE(ACTUAL_SALES_QTY * 100.0 SALES_FORECAST_QTY),0,Planning,Internal Only,FALSE,Calculated: actual/forecast * 100

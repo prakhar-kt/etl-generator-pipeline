@@ -92,7 +92,7 @@ class CSVParser:
         if file_path.suffix in (".xlsx", ".xls"):
             df = pd.read_excel(file_path)
         else:
-            df = pd.read_csv(file_path)
+            df = pd.read_csv(file_path, on_bad_lines='warn')
 
         df.columns = [c.strip().lower() for c in df.columns]
         col_map = self._resolve_columns(df.columns.tolist())
@@ -371,7 +371,7 @@ class CSVParser:
             if file_path.suffix in (".xlsx", ".xls"):
                 df = pd.read_excel(file_path, header=1)
             else:
-                df = pd.read_csv(file_path, header=1)
+                df = pd.read_csv(file_path, header=1, on_bad_lines='warn')
 
             df.columns = [c.strip().lower() for c in df.columns]
             col_map = self._resolve_columns(df.columns.tolist())
