@@ -1,6 +1,6 @@
 DATABASE FIELD,,,,,,,LOGIC,,,CLASSIFICATION & SECURITY,,,,,
 #,Field Name,Field Name Confirmed?,Field Type,Schema,Data Set,Table,cdl_fact_sales,cdl_dim_product,cdl_dim_company,Pseudo Logic,Default Value,Business Area,Data Classification,PII?,Comments / Notes
-ID,Field description,,Field type,GBQ Project,Dataset,Table name,CDL Sales Fact,CDL Product Dimension,CDL Company Dimension,Transformation logic,Default if NULL,Business area,Classification,PII flag,Notes
+ID,Field description,,Field type,Project ID,Dataset name,Table name,CDL Sales Fact,CDL Product Dimension,CDL Company Dimension,Transformation logic,Default if NULL,Business area,Classification,PII flag,Notes
 ,KEY_CALENDAR,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_sales_summary,KEY_CALENDAR,,,FARM_FINGERPRINT(CAST(TRANSACTION_DATE AS STRING)),,,Sales,Internal Only,FALSE
 ,KEY_PRODUCT,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_sales_summary,KEY_PRODUCT,KEY_PRODUCT,,KEY_PRODUCT from cdl_fact_sales joined to cdl_dim_product,,,Sales,Internal Only,FALSE
 ,KEY_COMPANY,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_sales_summary,KEY_COMPANY,,KEY_COMPANY,KEY_COMPANY from cdl_fact_sales joined to cdl_dim_company,,,Sales,Internal Only,FALSE

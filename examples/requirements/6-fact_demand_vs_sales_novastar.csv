@@ -1,6 +1,6 @@
 DATABASE FIELD,,,,,,,LOGIC,,,,,,CLASSIFICATION & SECURITY,,,,
 #,Field Name,Field Name Confirmed?,Field Type,Schema,Data Set,Table,cdl_fact_demand_forecast,cdl_fact_sales_forecast,cdl_fact_sales,cdl_dim_product,cdl_dim_company,Pseudo Logic,Default Value,Business Area,Data Classification,PII?,Comments / Notes
-ID,Field description,,Field type,GBQ Project,Dataset,Table name,Demand Forecast,Sales Forecast,Actual Sales,Product Dim,Company Dim,Transformation logic,Default if NULL,Business area,Classification,PII flag,Notes
+ID,Field description,,Field type,Project ID,Dataset name,Table name,Demand Forecast,Sales Forecast,Actual Sales,Product Dim,Company Dim,Transformation logic,Default if NULL,Business area,Classification,PII flag,Notes
 ,KEY_PRODUCT,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,KEY_PRODUCT,KEY_PRODUCT,KEY_PRODUCT,KEY_PRODUCT,,FARM_FINGERPRINT(TOY_NO),,,Planning,Internal Only,FALSE
 ,KEY_COMPANY,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,KEY_COMPANY,KEY_COMPANY,KEY_COMPANY,,KEY_COMPANY,KEY_COMPANY from source facts,,,Planning,Internal Only,FALSE
 ,KEY_SELLING_METHOD,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,KEY_SELLING_METHOD,KEY_SELLING_METHOD,KEY_SELLING_METHOD,,,KEY_SELLING_METHOD from source facts,,,Planning,Internal Only,FALSE
@@ -24,5 +24,5 @@ ID,Field description,,Field type,GBQ Project,Dataset,Table name,Demand Forecast,
 ,ACTUAL_SALES_VALUE,Y,NUMERIC,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,SUM(ORDER_VALUE),,,Sum of ORDER_VALUE from cdl_fact_sales where TRANSACTION_DATE matches FORECAST_DATE month,0,Planning,Internal Only,FALSE,
 ,DEMAND_VS_ACTUAL_VARIANCE,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,,DEMAND_PLAN_QTY - ACTUAL_SALES_QTY,0,Planning,Internal Only,FALSE,Calculated field
 ,FORECAST_VS_ACTUAL_VARIANCE,Y,INT64,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,,SALES_FORECAST_QTY - ACTUAL_SALES_QTY,0,Planning,Internal Only,FALSE,Calculated field
-,DEMAND_ACCURACY_PCT,Y,NUMERIC,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,,SAFE_DIVIDE(ACTUAL_SALES_QTY * 100.0 DEMAND_PLAN_QTY),0,Planning,Internal Only,FALSE,Calculated: actual/forecast * 100
-,FORECAST_ACCURACY_PCT,Y,NUMERIC,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,,SAFE_DIVIDE(ACTUAL_SALES_QTY * 100.0 SALES_FORECAST_QTY),0,Planning,Internal Only,FALSE,Calculated: actual/forecast * 100
+,DEMAND_ACCURACY_PCT,Y,NUMERIC,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,,"SAFE_DIVIDE(ACTUAL_SALES_QTY * 100.0, DEMAND_PLAN_QTY)",0,Planning,Internal Only,FALSE,Calculated: actual/forecast * 100
+,FORECAST_ACCURACY_PCT,Y,NUMERIC,m-mapping-gen-2026,Business_Logic,fact_demand_vs_sales,,,,,,"SAFE_DIVIDE(ACTUAL_SALES_QTY * 100.0, SALES_FORECAST_QTY)",0,Planning,Internal Only,FALSE,Calculated: actual/forecast * 100
