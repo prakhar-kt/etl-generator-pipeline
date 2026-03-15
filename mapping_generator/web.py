@@ -77,6 +77,33 @@ async def execute_bl(
     results = []
     errors = []
 
+    # Ensure the target dataset exists (extract from metadata or SQL)
+    target_table = mapping.get("metadata", {}).get("target_table_name", "")
+    # Extract dataset name from CREATE TABLE SQL: `project.dataset.table`
+    create_sql_raw = mapping.get("create_table", "")
+    dataset_name = None
+    if create_sql_raw:
+        import re
+        m = re.search(r'`[^`]+\.([^`]+)\.[^`]+`', create_sql_raw)
+        if m:
+            dataset_name = m.group(1)
+    if not dataset_name:
+        dataset_name = "Business_Logic"
+
+    try:
+        from google.cloud import bigquery as bq
+        dataset_ref = bq.DatasetReference(client.project, dataset_name)
+        client.get_dataset(dataset_ref)
+    except Exception:
+        try:
+            dataset = bq.Dataset(dataset_ref)
+            dataset.location = "US"
+            client.create_dataset(dataset)
+            results.append({"step": "create_dataset", "status": "success", "message": f"Created dataset {dataset_name}"})
+        except Exception as e:
+            errors.append(f"Failed to create dataset {dataset_name}: {e}")
+            results.append({"step": "create_dataset", "status": "error", "message": str(e)})
+
     # Replace Jinja2 placeholders with actual project
     def replace_placeholders(sql: str) -> str:
         project = client.project
