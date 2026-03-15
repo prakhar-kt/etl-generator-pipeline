@@ -159,9 +159,13 @@ async def execute_bl(
         sql = re.sub(r'\bLAST_MODIFY_DATE\b', 'CDL_LOAD_DATE', sql)
         sql = re.sub(r'\bLOAD_DATE\b', 'CDL_LOAD_DATE', sql)
 
-        # Fix undefined `src` struct reference — use SOURCE alias instead
-        sql = sql.replace('TO_JSON_STRING(src))', 'TO_JSON_STRING(SOURCE))')
-        sql = sql.replace('TO_JSON_STRING(SOURCE.src))', 'TO_JSON_STRING(SOURCE))')
+        # Fix ADMIN_ROW_HASH: TO_JSON_STRING(src/SOURCE) doesn't work in BQ MERGE
+        # Replace with a constant — row hash is non-critical for initial loads
+        sql = re.sub(
+            r'FARM_FINGERPRINT\(TO_JSON_STRING\((?:src|SOURCE(?:\.src)?)\)\)',
+            'FARM_FINGERPRINT(CAST(SOURCE.ADMIN_COMPOSITEKEY_HASH AS STRING))',
+            sql
+        )
 
         return sql
 
