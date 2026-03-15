@@ -15,7 +15,7 @@ from .cli import GENERATORS, _classify_input, _parse_inputs
 from .config import LAYERS, MAPPINGS_ROOT
 from .pipeline import (
     PipelineEvent, ensure_artifacts_table, ensure_datasets, extract_dataset_name,
-    run_execute, run_preview, run_tests, store_artifact,
+    run_execute, run_preview, run_refresh, run_tests, store_artifact,
 )
 from .sql_utils import cleanup_sql, prepare_merge_sql, replace_placeholders
 from .validator import MappingValidator
@@ -205,6 +205,45 @@ async def pipeline_history(target_table: str = ""):
                   FROM `{client.project}.Business_Logic.pipeline_artifacts`
                   {where}
                   ORDER BY created_at DESC LIMIT 50"""
+        job = client.query(sql)
+        rows = [dict(r.items()) for r in job.result()]
+        return {"runs": rows}
+    except Exception:
+        return {"runs": []}
+
+
+@app.post("/refresh-pipeline")
+async def refresh_pipeline():
+    """Refresh CDL + all active BL tables. SSE stream.
+
+    Designed to be called by Cloud Scheduler daily, or manually.
+    """
+    client = _get_bq_client()
+    if not client:
+        return JSONResponse(status_code=400, content={"errors": ["BigQuery not available."]})
+
+    async def event_stream():
+        try:
+            async for event in run_refresh(client, client.project):
+                yield f"data: {json.dumps(asdict(event), default=str)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'stage': 'refresh', 'status': 'failed', 'message': str(e)})}\n\n"
+        yield "data: {\"stage\": \"done\", \"status\": \"done\", \"message\": \"Complete\"}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/refresh-history")
+async def refresh_history(limit: int = 20):
+    """Return recent pipeline refresh runs."""
+    client = _get_bq_client()
+    if not client:
+        return {"runs": []}
+    try:
+        sql = f"""SELECT run_id, run_timestamp, step, table_name, status,
+                         rows_affected, duration_seconds, error_message, created_at
+                  FROM `{client.project}.Business_Logic.pipeline_runs`
+                  ORDER BY created_at DESC LIMIT {limit}"""
         job = client.query(sql)
         rows = [dict(r.items()) for r in job.result()]
         return {"runs": rows}

@@ -39,6 +39,20 @@ class PipelineEvent:
 
 # ---------- BQ artifact storage ----------
 
+PIPELINE_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS `{project}.Business_Logic.pipeline_runs` (
+  run_id          STRING NOT NULL,
+  run_timestamp   TIMESTAMP NOT NULL,
+  step            STRING NOT NULL,
+  table_name      STRING,
+  status          STRING NOT NULL,
+  rows_affected   INT64,
+  duration_seconds FLOAT64,
+  error_message   STRING,
+  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+)
+"""
+
 ARTIFACTS_DDL = """
 CREATE TABLE IF NOT EXISTS `{project}.Business_Logic.pipeline_artifacts` (
   artifact_id       STRING NOT NULL,
@@ -62,6 +76,29 @@ def ensure_artifacts_table(client, project: str):
     sql = ARTIFACTS_DDL.format(project=project)
     job = client.query(sql)
     job.result()
+
+
+def ensure_runs_table(client, project: str):
+    """Create pipeline_runs table if it doesn't exist."""
+    sql = PIPELINE_RUNS_DDL.format(project=project)
+    job = client.query(sql)
+    job.result()
+
+
+def log_pipeline_run(client, project: str, run_id: str, step: str,
+                     table_name: str, status: str, rows_affected: int = 0,
+                     duration_seconds: float = 0.0, error_message: str = ""):
+    """Log a pipeline run step to pipeline_runs table."""
+    err = _esc(error_message[:1000]) if error_message else ""
+    sql = f"""INSERT INTO `{project}.Business_Logic.pipeline_runs`
+    (run_id, run_timestamp, step, table_name, status, rows_affected, duration_seconds, error_message)
+    VALUES ('{run_id}', CURRENT_TIMESTAMP(), '{step}', '{_esc(table_name)}',
+            '{status}', {rows_affected}, {duration_seconds}, '{err}')"""
+    try:
+        job = client.query(sql)
+        job.result()
+    except Exception as e:
+        logger.error(f"Failed to log pipeline run: {e}")
 
 
 def store_artifact(client, project: str, artifact_id: str, filename: str,
@@ -388,3 +425,182 @@ async def run_tests(
 
 # Need re import for the regex in run_tests
 import re
+import time
+from pathlib import Path
+
+
+# ---------- Pipeline: Refresh (daily scheduled) ----------
+
+def _run_cdl_transforms(client, project: str) -> tuple[bool, str, int]:
+    """Re-run RAW → CDL MERGE transforms. Returns (success, error_msg, statements_run)."""
+    transform_file = Path(__file__).parent.parent / "synthetic_data" / "sql" / "transforms" / "01_raw_to_cdl.sql"
+    if not transform_file.exists():
+        return False, f"Transform file not found: {transform_file}", 0
+
+    sql = transform_file.read_text()
+    sql = sql.replace("{{ project }}", project)
+
+    statements = [s.strip() for s in sql.split(";") if s.strip()]
+    run_count = 0
+
+    for stmt in statements:
+        lines = [l for l in stmt.split("\n") if l.strip() and not l.strip().startswith("--")]
+        if not lines:
+            continue
+        try:
+            job = client.query(stmt + ";")
+            job.result()
+            run_count += 1
+        except Exception as e:
+            return False, f"CDL transform failed on statement {run_count + 1}: {e}", run_count
+
+    return True, "", run_count
+
+
+def _get_active_bl_yamls(client, project: str) -> list[dict]:
+    """Fetch all active BL YAMLs from pipeline_artifacts (latest version, preferring 'passed')."""
+    sql = f"""SELECT target_table, filename, yaml_content, version, status
+              FROM `{project}.Business_Logic.pipeline_artifacts`
+              WHERE yaml_content IS NOT NULL
+              QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY target_table
+                ORDER BY
+                  CASE status WHEN 'passed' THEN 1 WHEN 'executed' THEN 2 WHEN 'testing' THEN 3 WHEN 'generated' THEN 4 ELSE 5 END,
+                  version DESC
+              ) = 1"""
+    try:
+        job = client.query(sql)
+        return [dict(r.items()) for r in job.result()]
+    except Exception:
+        return []
+
+
+def _get_row_count(client, project: str, table_name: str) -> int:
+    """Get row count for a BL table."""
+    try:
+        table_ref = f"{project}.Business_Logic.{table_name}"
+        table = client.get_table(table_ref)
+        return table.num_rows or 0
+    except Exception:
+        return 0
+
+
+async def run_refresh(bq_client, project: str) -> AsyncGenerator[PipelineEvent, None]:
+    """Refresh CDL + all active BL tables. Yields SSE events for progress tracking."""
+    run_id = str(uuid.uuid4())
+
+    # Ensure logging table exists
+    await asyncio.to_thread(ensure_datasets, bq_client, project)
+    await asyncio.to_thread(ensure_runs_table, bq_client, project)
+
+    yield PipelineEvent(stage="refresh", status="running",
+                        message="Starting daily refresh...")
+
+    # ── Step 1: CDL refresh ──────────────────────────────────
+    yield PipelineEvent(stage="refresh_cdl", status="running",
+                        message="Refreshing CDL layer (RAW → CDL transforms)...")
+
+    t0 = time.time()
+    ok, err, stmt_count = await asyncio.to_thread(_run_cdl_transforms, bq_client, project)
+    duration = time.time() - t0
+
+    if ok:
+        await asyncio.to_thread(
+            log_pipeline_run, bq_client, project, run_id, "cdl_refresh",
+            "CDL_NovaStar", "success", stmt_count, duration
+        )
+        yield PipelineEvent(stage="refresh_cdl", status="success",
+                            message=f"CDL refresh complete — {stmt_count} transforms in {duration:.1f}s")
+    else:
+        await asyncio.to_thread(
+            log_pipeline_run, bq_client, project, run_id, "cdl_refresh",
+            "CDL_NovaStar", "failed", stmt_count, duration, err
+        )
+        yield PipelineEvent(stage="refresh_cdl", status="failed",
+                            message="CDL refresh failed", detail=err)
+        # Continue to BL even if CDL fails — some BL tables may not depend on failed CDL tables
+
+    # ── Step 2: BL refresh ───────────────────────────────────
+    yield PipelineEvent(stage="refresh_bl", status="running",
+                        message="Fetching active BL mappings from pipeline_artifacts...")
+
+    bl_yamls = await asyncio.to_thread(_get_active_bl_yamls, bq_client, project)
+
+    if not bl_yamls:
+        yield PipelineEvent(stage="refresh_bl", status="success",
+                            message="No active BL tables to refresh")
+        yield PipelineEvent(stage="refresh", status="success",
+                            message="Refresh complete (no BL tables)")
+        return
+
+    yield PipelineEvent(stage="refresh_bl", status="running",
+                        message=f"Refreshing {len(bl_yamls)} BL tables...")
+
+    success_count = 0
+    fail_count = 0
+
+    for bl in bl_yamls:
+        table_name = bl["target_table"]
+        yaml_content = bl["yaml_content"]
+        filename = bl.get("filename", "")
+
+        yield PipelineEvent(stage="refresh_bl_table", status="running",
+                            message=f"Refreshing {table_name}...",
+                            table_location=f"`{project}.Business_Logic.{table_name}`")
+
+        t0 = time.time()
+
+        # Extract dataset from the YAML's CREATE TABLE
+        mapping = yaml.safe_load(yaml_content) or {}
+        create_sql = mapping.get("create_table", "")
+        dataset_name = extract_dataset_name(create_sql) if create_sql else "Business_Logic"
+
+        # Only run MERGE (skip CREATE TABLE — table already exists)
+        merge_sql = mapping.get("merge_statement", "") or mapping.get("other_statement", "")
+        if not merge_sql:
+            yield PipelineEvent(stage="refresh_bl_table", status="success",
+                                message=f"{table_name} — no MERGE SQL, skipped",
+                                table_location=f"`{project}.{dataset_name}.{table_name}`")
+            continue
+
+        raw_create = mapping.get("create_table", "")
+        merge_sql = fix_type_mismatches(merge_sql, raw_create)
+        merge_sql = cleanup_sql(replace_placeholders(merge_sql, project, dataset_name))
+        merge_sql = prepare_merge_sql(merge_sql)
+
+        try:
+            job = await asyncio.to_thread(bq_client.query, merge_sql)
+            await asyncio.to_thread(job.result)
+            duration = time.time() - t0
+            row_count = await asyncio.to_thread(_get_row_count, bq_client, project, table_name)
+
+            await asyncio.to_thread(
+                log_pipeline_run, bq_client, project, run_id, "bl_refresh",
+                table_name, "success", row_count, duration
+            )
+            success_count += 1
+            yield PipelineEvent(stage="refresh_bl_table", status="success",
+                                message=f"{table_name} refreshed — {row_count:,} rows ({duration:.1f}s)",
+                                table_location=f"`{project}.{dataset_name}.{table_name}`")
+        except Exception as e:
+            duration = time.time() - t0
+            error_msg = str(e)[:500]
+            await asyncio.to_thread(
+                log_pipeline_run, bq_client, project, run_id, "bl_refresh",
+                table_name, "failed", 0, duration, error_msg
+            )
+            fail_count += 1
+            yield PipelineEvent(stage="refresh_bl_table", status="failed",
+                                message=f"{table_name} failed",
+                                detail=error_msg,
+                                table_location=f"`{project}.{dataset_name}.{table_name}`")
+
+    # ── Summary ──────────────────────────────────────────────
+    total = success_count + fail_count
+    status = "success" if fail_count == 0 else "failed"
+    yield PipelineEvent(
+        stage="refresh", status=status,
+        message=f"Refresh complete: {success_count}/{total} BL tables succeeded"
+              + (f", {fail_count} failed" if fail_count else "")
+              + (", CDL refresh failed" if not ok else "")
+    )
