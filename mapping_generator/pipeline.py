@@ -301,9 +301,18 @@ async def run_pipeline(
 
     try:
         tests = generate_tests(current_yaml, project)
+        if not tests:
+            yield PipelineEvent(stage="test", status="success",
+                                message="No tests to run (could not determine target table)",
+                                test_results=[])
+            return
     except Exception as e:
-        yield PipelineEvent(stage="test", status="failed", message="Failed to generate tests",
-                            detail=str(e))
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Failed to generate tests: {tb}")
+        yield PipelineEvent(stage="test", status="failed",
+                            message="Failed to generate tests",
+                            detail=f"{type(e).__name__}: {e}")
         return
 
     # Store test definitions

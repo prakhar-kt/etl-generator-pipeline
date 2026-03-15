@@ -10,9 +10,28 @@ def generate_tests(yaml_content: str, project: str) -> list[dict]:
 
     Returns list of dicts with keys: name, sql, expected, severity, description
     """
-    mapping = yaml.safe_load(yaml_content)
+    # Strip Jinja2 {{ }} placeholders before YAML parsing — they break yaml.safe_load
+    safe_yaml = re.sub(r'\{\{[^}]*\}\}', 'PLACEHOLDER', yaml_content)
+    try:
+        mapping = yaml.safe_load(safe_yaml)
+    except yaml.YAMLError:
+        # Fallback: try to extract table name from raw text
+        mapping = None
+
     if not mapping:
-        return []
+        # Try regex extraction as last resort
+        m = re.search(r'target_table_name:\s*["\']?([^"\'\n]+)', yaml_content)
+        target_table = m.group(1).strip().strip('"').strip("'").split(".")[-1] if m else ""
+        if not target_table:
+            m = re.search(r'`[^`]+\.[^`]+\.([^`]+)`', yaml_content)
+            target_table = m.group(1) if m else ""
+        if not target_table:
+            return []
+        # Build minimal mapping for test generation
+        mapping = {
+            "metadata": {"target_table_name": target_table},
+            "create_table": "",
+        }
 
     metadata = mapping.get("metadata", {})
     target_table_fq = metadata.get("target_table_name", "")
@@ -21,11 +40,13 @@ def generate_tests(yaml_content: str, project: str) -> list[dict]:
     if not target_table:
         # Try to extract from create_table SQL
         create_sql = mapping.get("create_table", "")
-        m = re.search(r'`[^`]+\.[^`]+\.([^`]+)`', create_sql)
+        m = re.search(r'`[^`]+\.[^`]+\.([^`]+)`', create_sql or "")
         if m:
             target_table = m.group(1)
     if not target_table:
         return []
+    # Clean up placeholder artifacts
+    target_table = target_table.replace("PLACEHOLDER", "").strip()
 
     # Extract dataset from create_table or default
     create_sql = mapping.get("create_table", "")
