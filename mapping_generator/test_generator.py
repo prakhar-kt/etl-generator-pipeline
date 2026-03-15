@@ -173,8 +173,14 @@ def _extract_source_tables(mapping: dict, project: str) -> list[tuple[str, str]]
     if not source_names:
         return []
 
+    # Handle both list and comma-separated string formats
+    if isinstance(source_names, list):
+        parts_list = source_names
+    else:
+        parts_list = source_names.split(",")
+
     tables = []
-    for part in source_names.split(","):
+    for part in parts_list:
         part = part.strip().strip("`").strip("'").strip('"')
         if not part:
             continue
