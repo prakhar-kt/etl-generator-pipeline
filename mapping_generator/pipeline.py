@@ -11,6 +11,7 @@ import yaml
 
 from .config import CLAUDE_MODEL, LLM_PROVIDER, MAX_TOKENS
 from .generators.base import _create_llm_client
+from .lessons import format_lessons_prompt
 from .sql_utils import cleanup_sql, ensure_datasets, extract_dataset_name, fix_type_mismatches, prepare_merge_sql, replace_placeholders
 from .test_generator import evaluate_test_result, generate_tests
 
@@ -105,14 +106,14 @@ def call_llm_fix(yaml_content: str, error_message: str, context: str = "executio
     """
     client = _create_llm_client(LLM_PROVIDER)
 
+    lessons = format_lessons_prompt(max_dynamic=3)
+
     if context == "execution":
-        system_prompt = """You are a BigQuery SQL expert. The user will provide a YAML mapping file
+        system_prompt = f"""You are a BigQuery SQL expert. The user will provide a YAML mapping file
 that contains BigQuery SQL (CREATE TABLE and MERGE statements). The SQL failed with an error.
-Fix the YAML so the SQL executes successfully. Common issues:
-- Wrong column names (CDL tables use CDL_LOAD_DATE, not LOAD_DATE)
-- Missing GROUP BY columns
-- Invalid STRUCT references
-- AS aliases in VALUES clauses (BigQuery doesn't allow them)
+Fix the YAML so the SQL executes successfully.
+
+{lessons}
 
 Return ONLY the corrected YAML content. No markdown fences. No explanation."""
     else:

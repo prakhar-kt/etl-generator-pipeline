@@ -5,6 +5,7 @@ import json
 import yaml
 
 from ..config import ADMIN_COLUMNS, ADMIN_MERGE_INSERT_VALUES, ADMIN_MERGE_UPDATE_SET
+from ..lessons import format_lessons_prompt
 from ..parsers.csv_parser import ParsedRequirements
 from .base import BaseGenerator
 
@@ -169,6 +170,9 @@ cdl_dim_calendar: KEY_CALENDAR, CALENDAR_DATE, YEAR, QUARTER, MONTH, WEEK, DAY_O
 - CDL source tables MUST use: `{{{{ source_projects[0] }}}}.CDL_NovaStar.<table_name>` — for example `{{{{ source_projects[0] }}}}.CDL_NovaStar.cdl_fact_sales`
 - NEVER use patterns like `{{{{ source_projects[0] }}}}.GBQ Project.Dataset.table` or any other placeholder dataset names.
 - Dimension/lookup tables in BL use: `{{{{ source_projects[2] }}}}.Business_Logic.<table_name>`
+
+## LESSONS FROM PAST MISTAKES — Study these carefully and do NOT repeat them:
+{format_lessons_prompt()}
 
 Output ONLY valid YAML content. Use `|` for multiline SQL blocks. No markdown fences."""
 
