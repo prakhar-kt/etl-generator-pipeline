@@ -29,6 +29,7 @@ class PipelineEvent:
     max_attempts: int = MAX_RETRY
     version: int = 1
     detail: str = ""
+    test_sql: str = ""
     fixed_yaml: str = ""
     test_name: str = ""
     test_results: list = field(default_factory=list)
@@ -363,7 +364,8 @@ async def run_tests(
             yield PipelineEvent(stage="test_item", status="failed",
                                 message=f"{test['name']} failed",
                                 test_name=test["name"],
-                                detail=result.get("detail", ""))
+                                detail=result.get("detail", ""),
+                                test_sql=test.get("sql", ""))
 
         all_results.append(result)
 

@@ -387,7 +387,14 @@ async function runUnitTests(i) {
             document.getElementById('errorPanel'+i).innerHTML = '<div class="dag-error-panel"><h4>Test Pipeline Failed</h4><div class="err-name">' + escapeHtml(ev.message) + '</div><div class="err-detail">' + escapeHtml(ev.detail||'') + '</div></div>';
           }
           if (ev.stage === 'test_item' && ev.status === 'failed') {
-            document.getElementById('errorPanel'+i).innerHTML = '<div class="dag-error-panel"><h4>Test Failed: '+testLabel(ev.test_name)+'</h4><div class="err-detail">' + escapeHtml(ev.detail||'') + '</div></div>';
+            let errHtml = '<div class="dag-error-panel"><h4>Test Failed: '+testLabel(ev.test_name)+'</h4>';
+            errHtml += '<div class="err-detail" style="margin-bottom:0.5rem;">' + escapeHtml(ev.detail||'') + '</div>';
+            if (ev.test_sql) {
+              errHtml += '<div style="margin-top:0.5rem;"><strong style="font-size:0.75rem;color:#991b1b;">Test SQL:</strong>';
+              errHtml += '<pre style="background:#1e1e2e;color:#cdd6f4;padding:0.6rem;border-radius:4px;font-size:0.7rem;overflow-x:auto;margin-top:0.3rem;white-space:pre-wrap;max-height:200px;overflow-y:auto;">' + escapeHtml(ev.test_sql) + '</pre></div>';
+            }
+            errHtml += '</div>';
+            document.getElementById('errorPanel'+i).innerHTML = errHtml;
           }
           if (ev.stage === 'test_item' && ev.status === 'retrying') {
             document.getElementById('errorPanel'+i).innerHTML = '<div class="dag-error-panel"><h4>Retrying: '+testLabel(ev.test_name)+' ('+ev.attempt+'/'+ev.max_attempts+')</h4><div class="err-detail">' + escapeHtml(ev.detail||'') + '</div></div>';
