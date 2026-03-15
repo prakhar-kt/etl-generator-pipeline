@@ -28,7 +28,10 @@ def replace_placeholders(sql: str, project: str, dataset_name: str = "Business_L
     # For unquoted remaining placeholders, just remove the braces
     sql = re.sub(r'\{\{[^}]*\}\}', '0', sql)
 
-    # Step 3: Route tables to correct datasets based on table name prefix
+    # Step 3: Rename bl_dim_* to cdl_dim_* (LLM invents bl_dim tables that don't exist)
+    sql = re.sub(r'\bbl_dim_', 'cdl_dim_', sql, flags=re.IGNORECASE)
+
+    # Step 3b: Route tables to correct datasets based on table name prefix
     esc_project = re.escape(project)
     sql = re.sub(
         rf'`{esc_project}\.[^`]*?\.(cdl_|src_|raw_)',

@@ -115,6 +115,10 @@ BASELINE_LESSONS = [
         "rule": "Do NOT use reserved words as CTE or alias names. Avoid: src, final, source, target, result, data. Use descriptive names like base_demand, deduped_data, final_output instead.",
     },
     {
+        "error_pattern": "bl_dim_.*not found",
+        "rule": "Tables named bl_dim_* do NOT exist. Dimension tables are in CDL_NovaStar with prefix cdl_dim_: cdl_dim_company, cdl_dim_product, cdl_dim_customer, cdl_dim_selling_method, cdl_dim_calendar. Always use cdl_dim_ prefix, never bl_dim_.",
+    },
+    {
         "error_pattern": "NULL.*FULL OUTER JOIN|NULLs found",
         "rule": "When using FULL OUTER JOIN to combine fact tables, ALWAYS wrap ALL columns with COALESCE to prevent NULLs: COALESCE(col, 0) for INT64/NUMERIC, COALESCE(col, 'N/A') for STRING, COALESCE(col, DATE('1900-01-01')) for DATE, COALESCE(col, TIMESTAMP('1900-01-01')) for TIMESTAMP. No column in the final output should ever be NULL.",
     },
