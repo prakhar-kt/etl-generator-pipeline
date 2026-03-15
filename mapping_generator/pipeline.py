@@ -239,10 +239,9 @@ async def run_execute(
     project_id: str,
     bq_client,
 ) -> AsyncGenerator[PipelineEvent, None]:
-    """Execute SQL from YAML with self-healing retry (max 3)."""
+    """Execute SQL from YAML. No retries — reports error directly."""
     project = bq_client.project or project_id
     current_yaml = yaml_content
-    version = 1
 
     mapping = yaml.safe_load(current_yaml) or {}
     target_table = mapping.get("metadata", {}).get("target_table_name", "").split(".")[-1]
@@ -255,63 +254,26 @@ async def run_execute(
 
     table_location = f"`{project}.{dataset_name}.{target_table}`"
 
-    for attempt in range(1, MAX_RETRY + 1):
-        yield PipelineEvent(stage="execute", status="running",
-                            message=f"Executing SQL (attempt {attempt}/{MAX_RETRY})...",
-                            attempt=attempt, version=version)
+    yield PipelineEvent(stage="execute", status="running", message="Executing SQL...")
 
-        ok, error_msg = await asyncio.to_thread(
-            _execute_yaml_sql, bq_client, current_yaml, project, dataset_name
+    ok, error_msg = await asyncio.to_thread(
+        _execute_yaml_sql, bq_client, current_yaml, project, dataset_name
+    )
+
+    if ok:
+        await asyncio.to_thread(
+            upsert_latest_yaml, bq_client, project, target_table,
+            filename, current_yaml, 1, "executed"
         )
-
-        if ok:
-            # Store the successful YAML version
-            await asyncio.to_thread(
-                upsert_latest_yaml, bq_client, project, target_table,
-                filename, current_yaml, version, "executed"
-            )
-            yield PipelineEvent(stage="execute", status="success",
-                                message="SQL executed successfully",
-                                attempt=attempt, version=version,
-                                table_location=table_location)
-            return
-
-        logger.warning(f"Execute attempt {attempt} failed: {error_msg}")
-
-        if attempt < MAX_RETRY:
-            yield PipelineEvent(stage="execute", status="retrying",
-                                message=f"Execution failed, asking LLM to fix...",
-                                attempt=attempt, version=version, detail=error_msg)
-            try:
-                fix = await asyncio.to_thread(call_llm_fix, current_yaml, error_msg, "execution")
-                if fix.get("yaml"):
-                    # Store the error→fix as a lesson for future learning
-                    await asyncio.to_thread(
-                        store_lesson, error_msg[:500],
-                        f"LLM fixed execution error on attempt {attempt}",
-                        "execution"
-                    )
-                    version += 1
-                    current_yaml = fix["yaml"]
-                    yield PipelineEvent(stage="execute", status="running",
-                                        message=f"Retrying with LLM-fixed YAML (v{version})...",
-                                        attempt=attempt + 1, version=version,
-                                        fixed_yaml=current_yaml)
-            except Exception as llm_err:
-                yield PipelineEvent(stage="execute", status="failed",
-                                    message="LLM fix failed", detail=str(llm_err))
-                return
-        else:
-            # Store unfixed error as a lesson too
-            await asyncio.to_thread(
-                store_lesson, error_msg[:500],
-                f"UNFIXED: execution failed after {MAX_RETRY} attempts",
-                "execution_unfixed"
-            )
-            yield PipelineEvent(stage="execute", status="failed",
-                                message=f"Failed after {MAX_RETRY} attempts",
-                                attempt=attempt, version=version, detail=error_msg)
-            return
+        yield PipelineEvent(stage="execute", status="success",
+                            message="SQL executed successfully",
+                            table_location=table_location)
+    else:
+        await asyncio.to_thread(
+            store_lesson, error_msg[:500], "Execution failed", "execution"
+        )
+        yield PipelineEvent(stage="execute", status="failed",
+                            message="Execution failed", detail=error_msg)
 
 
 # ---------- Pipeline: Preview ----------
@@ -329,7 +291,7 @@ async def run_preview(target_table: str, project_id: str, bq_client) -> list[dic
     return [dict(r.items()) for r in rows_raw]
 
 
-# ---------- Pipeline: Tests (sequential, per-test retry) ----------
+# ---------- Pipeline: Tests (sequential, no retries) ----------
 
 async def run_tests(
     yaml_content: str,
@@ -337,13 +299,11 @@ async def run_tests(
     bq_client,
     filename: str = "",
 ) -> AsyncGenerator[PipelineEvent, None]:
-    """Run DQ tests one by one. Each test retries up to 3 times via LLM fix."""
+    """Run DQ tests one by one. No retries — reports failures directly."""
     project = bq_client.project or project_id
-    current_yaml = yaml_content
-    version = 1
 
     try:
-        tests = generate_tests(current_yaml, project)
+        tests = generate_tests(yaml_content, project)
         if not tests:
             yield PipelineEvent(stage="test", status="success",
                                 message="No tests to run", test_results=[])
@@ -360,136 +320,68 @@ async def run_tests(
                         test_results=[{"name": t["name"], "status": "pending",
                                        "detail": t["description"]} for t in tests])
 
-    mapping = yaml.safe_load(re.sub(r'\{\{[^}]*\}\}', 'X', current_yaml)) or {}
-    dataset_name = extract_dataset_name(mapping.get("create_table", ""))
-    target_table = mapping.get("metadata", {}).get("target_table_name", "").split(".")[-1]
-
     all_results = []
+    has_failures = False
 
     for test in tests:
-        test_passed = False
-        current_test = dict(test)  # allow test SQL to be modified
+        yield PipelineEvent(stage="test_item", status="running",
+                            message=f"Running {test['name']}...",
+                            test_name=test["name"])
 
-        for attempt in range(1, MAX_RETRY + 1):
-            yield PipelineEvent(stage="test_item", status="running",
-                                message=f"Running {test['name']} (attempt {attempt}/{MAX_RETRY})...",
-                                test_name=test["name"], attempt=attempt)
-
-            # Run the test
-            try:
-                if current_test.get("_dynamic"):
-                    result = {"name": test["name"], "status": "skip", "detail": "Skipped"}
-                    test_passed = True
-                else:
-                    job = await asyncio.to_thread(bq_client.query, current_test["sql"])
-                    rows_raw = await asyncio.to_thread(lambda: list(job.result()))
-                    rows = [dict(r.items()) for r in rows_raw]
-                    result = evaluate_test_result(current_test, rows)
-            except Exception as e:
-                result = {"name": test["name"], "status": "fail",
-                          "detail": f"Test query error: {str(e)[:300]}",
-                          "severity": test.get("severity", "error")}
-
-            if result["status"] == "pass" or result["status"] == "skip":
-                test_passed = True
-                yield PipelineEvent(stage="test_item", status="success",
-                                    message=f"{test['name']} passed",
-                                    test_name=test["name"], attempt=attempt,
-                                    detail=result.get("detail", ""))
-                all_results.append(result)
-                break
-
-            # Test failed
-            if result.get("severity") == "warning":
-                # Warnings don't block — mark as pass with warning
-                yield PipelineEvent(stage="test_item", status="success",
-                                    message=f"{test['name']} warning",
-                                    test_name=test["name"], attempt=attempt,
-                                    detail=result.get("detail", ""))
-                all_results.append(result)
-                test_passed = True
-                break
-
-            if attempt < MAX_RETRY:
-                yield PipelineEvent(stage="test_item", status="retrying",
-                                    message=f"{test['name']} failed, asking LLM to fix...",
-                                    test_name=test["name"], attempt=attempt,
-                                    detail=result.get("detail", ""))
-                try:
-                    error_ctx = f"Test '{test['name']}' ({test['description']}) failed: {result['detail']}"
-                    fix = await asyncio.to_thread(
-                        call_llm_fix, current_yaml, error_ctx, "test_fix",
-                        current_test["sql"]
-                    )
-                    if fix.get("yaml"):
-                        # Store lesson and persist fixed YAML
-                        await asyncio.to_thread(
-                            store_lesson, error_ctx[:500],
-                            f"Fixed {test['name']} by modifying YAML SQL on attempt {attempt}",
-                            f"test_{test['name']}"
-                        )
-                        version += 1
-                        current_yaml = fix["yaml"]
-                        await asyncio.to_thread(
-                            upsert_latest_yaml, bq_client, project, target_table,
-                            filename, current_yaml, version, "testing"
-                        )
-                        # Re-execute YAML then re-run test
-                        ok, err = await asyncio.to_thread(
-                            _execute_yaml_sql, bq_client, current_yaml, project, dataset_name
-                        )
-                        if not ok:
-                            yield PipelineEvent(stage="test_item", status="retrying",
-                                                message=f"Re-execution failed: {err[:200]}",
-                                                test_name=test["name"], attempt=attempt)
-                        # Regenerate tests with new YAML
-                        new_tests = generate_tests(current_yaml, project)
-                        # Find the matching test by name
-                        for nt in new_tests:
-                            if nt["name"] == test["name"]:
-                                current_test = nt
-                                break
-                        yield PipelineEvent(stage="test_item", status="running",
-                                            message=f"Retrying {test['name']} with fixed YAML...",
-                                            test_name=test["name"], attempt=attempt + 1,
-                                            fixed_yaml=current_yaml)
-                    elif fix.get("test_sql"):
-                        # Store lesson: test failure fixed by test SQL change
-                        await asyncio.to_thread(
-                            store_lesson, error_ctx[:500],
-                            f"Fixed {test['name']} by modifying test SQL on attempt {attempt}",
-                            f"test_{test['name']}"
-                        )
-                        current_test["sql"] = fix["test_sql"]
-                        yield PipelineEvent(stage="test_item", status="running",
-                                            message=f"Retrying {test['name']} with fixed test SQL...",
-                                            test_name=test["name"], attempt=attempt + 1)
-                except Exception as llm_err:
-                    logger.error(f"LLM fix failed for {test['name']}: {llm_err}")
+        try:
+            if test.get("_dynamic"):
+                result = {"name": test["name"], "status": "skip", "detail": "Skipped"}
             else:
-                # Max retries reached — stop pipeline
-                all_results.append(result)
-                yield PipelineEvent(stage="test_item", status="failed",
-                                    message=f"{test['name']} failed after {MAX_RETRY} attempts",
-                                    test_name=test["name"], attempt=attempt,
-                                    detail=result.get("detail", ""))
-                yield PipelineEvent(stage="test", status="failed",
-                                    message=f"Pipeline stopped: {test['name']} failed",
-                                    detail=result.get("detail", ""),
-                                    test_results=all_results)
-                return
+                job = await asyncio.to_thread(bq_client.query, test["sql"])
+                rows_raw = await asyncio.to_thread(lambda: list(job.result()))
+                rows = [dict(r.items()) for r in rows_raw]
+                result = evaluate_test_result(test, rows)
+        except Exception as e:
+            result = {"name": test["name"], "status": "fail",
+                      "detail": f"Test query error: {str(e)[:300]}",
+                      "severity": test.get("severity", "error")}
 
-        if not test_passed:
-            return
+        if result["status"] == "pass" or result["status"] == "skip":
+            yield PipelineEvent(stage="test_item", status="success",
+                                message=f"{test['name']} passed",
+                                test_name=test["name"],
+                                detail=result.get("detail", ""))
+        elif result.get("severity") == "warning":
+            yield PipelineEvent(stage="test_item", status="success",
+                                message=f"{test['name']} warning",
+                                test_name=test["name"],
+                                detail=result.get("detail", ""))
+        else:
+            has_failures = True
+            # Store as lesson for future learning
+            await asyncio.to_thread(
+                store_lesson,
+                f"Test '{test['name']}' failed: {result.get('detail', '')}"[:500],
+                f"Test failure in {test['name']}",
+                f"test_{test['name']}"
+            )
+            yield PipelineEvent(stage="test_item", status="failed",
+                                message=f"{test['name']} failed",
+                                test_name=test["name"],
+                                detail=result.get("detail", ""))
 
-    # All tests passed — persist final YAML as "passed"
-    await asyncio.to_thread(
-        upsert_latest_yaml, bq_client, project, target_table,
-        filename, current_yaml, version, "passed"
-    )
-    yield PipelineEvent(stage="test", status="success",
-                        message=f"All {len(all_results)} tests passed",
-                        test_results=all_results)
+        all_results.append(result)
+
+    if has_failures:
+        yield PipelineEvent(stage="test", status="failed",
+                            message="Some tests failed",
+                            test_results=all_results)
+    else:
+        # All passed — persist YAML as "passed"
+        mapping = yaml.safe_load(re.sub(r'\{\{[^}]*\}\}', 'X', yaml_content)) or {}
+        target_table = mapping.get("metadata", {}).get("target_table_name", "").split(".")[-1]
+        await asyncio.to_thread(
+            upsert_latest_yaml, bq_client, project, target_table,
+            filename, yaml_content, 1, "passed"
+        )
+        yield PipelineEvent(stage="test", status="success",
+                            message=f"All {len(all_results)} tests passed",
+                            test_results=all_results)
 
 
 # Need re import for the regex in run_tests
