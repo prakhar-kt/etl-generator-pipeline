@@ -34,6 +34,9 @@
     .btn-execute { background: #6366f1; color: #fff; padding: 0.4rem 1rem; font-size: 0.8rem; }
     .btn-execute:hover { background: #4f46e5; }
     .btn-execute:disabled { background: #a5b4fc; cursor: not-allowed; }
+    .btn-edit { background: #f59e0b; color: #fff; padding: 0.4rem 1rem; font-size: 0.8rem; }
+    .btn-edit:hover { background: #d97706; }
+    .yaml-edit { background: #1e1e2e; color: #cdd6f4; padding: 1rem; border-radius: 6px; overflow-x: auto; max-height: 400px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem; line-height: 1.5; white-space: pre; width: 100%; border: 2px solid #4a6cf7; resize: vertical; min-height: 200px; }
     .success-box { background: #f0fdf4; border: 1px solid #86efac; color: #166534; border-radius: 6px; padding: 0.5rem 0.8rem; margin-top: 0.5rem; font-size: 0.8rem; }
     .exec-results { margin-top: 0.8rem; }
     .exec-step { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; font-size: 0.82rem; }
@@ -220,10 +223,11 @@
             <h3>${file.filename}</h3>
             <div style="display:flex;gap:0.5rem;">
               ${execBtn}
+              <button class="btn btn-edit" onclick="toggleEdit(${i})" id="editBtn${i}">Edit</button>
               <button class="btn btn-download" onclick="downloadFile(${i})">Download</button>
             </div>
           </div>
-          <div class="yaml-content">${escapeHtml(file.content)}</div>
+          <div id="yamlContainer${i}"><div class="yaml-content">${escapeHtml(file.content)}</div></div>
           ${warningsHtml}
           <div id="execResults${i}" class="exec-results"></div>
         `;
@@ -288,6 +292,36 @@
         await executeFile(i);
       }
     });
+
+    function toggleEdit(index) {
+      const file = generatedFiles[index];
+      const container = document.getElementById('yamlContainer' + index);
+      const btn = document.getElementById('editBtn' + index);
+
+      if (btn.textContent === 'Edit') {
+        // Switch to edit mode
+        const textarea = document.createElement('textarea');
+        textarea.className = 'yaml-edit';
+        textarea.value = file.content;
+        textarea.id = 'yamlEdit' + index;
+        textarea.rows = Math.min(file.content.split('\n').length + 2, 30);
+        container.innerHTML = '';
+        container.appendChild(textarea);
+        btn.textContent = 'Save';
+        btn.style.background = '#22c55e';
+      } else {
+        // Save changes
+        const textarea = document.getElementById('yamlEdit' + index);
+        generatedFiles[index].content = textarea.value;
+        const div = document.createElement('div');
+        div.className = 'yaml-content';
+        div.textContent = textarea.value;
+        container.innerHTML = '';
+        container.appendChild(div);
+        btn.textContent = 'Edit';
+        btn.style.background = '#f59e0b';
+      }
+    }
 
     function downloadFile(index) {
       const file = generatedFiles[index];

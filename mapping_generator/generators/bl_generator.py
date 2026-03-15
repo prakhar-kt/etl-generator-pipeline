@@ -109,7 +109,7 @@ The YAML file must have these exact top-level keys:
    - ALWAYS include these admin columns at the end:
 {admin_cols_text}
 3. `get_max_date: |` - Query to get the max incremental timestamp
-   - For "CDL to BL": use `MAX(LOAD_DATE)` (the source data's load timestamp)
+   - For "CDL to BL": use `MAX(CDL_LOAD_DATE)` (the CDL layer's load timestamp — NOT LOAD_DATE)
    - For "BL to BL": use `MAX(ADMIN_LOAD_DATE)`
 4. Either `merge_statement: |` (for CDL to BL) or `other_statement: |` (for BL to BL)
    - For MERGE: Use MERGE INTO target USING (subquery) AS SOURCE ON ADMIN_COMPOSITEKEY_HASH
@@ -118,7 +118,7 @@ The YAML file must have these exact top-level keys:
 
 ## CRITICAL SQL generation rules:
 - ALWAYS apply REPLACE, SAFE_CAST, and other transforms EXACTLY as specified in the field mappings
-- ALWAYS include a deduplication step using ROW_NUMBER() OVER (PARTITION BY composite_key ORDER BY LAST_MODIFY_DATE DESC) WHERE RN = 1
+- ALWAYS include a deduplication step using ROW_NUMBER() OVER (PARTITION BY composite_key ORDER BY CDL_LOAD_DATE DESC) WHERE RN = 1
 - ALWAYS use SELECT DISTINCT in base CTEs to eliminate duplicate source rows
 - ADMIN_COMPOSITEKEY_HASH must include ALL composite key columns (all fields marked as KEY plus date range fields)
 - ADMIN_ROW_HASH must include ALL non-admin data columns
@@ -132,6 +132,34 @@ The merge_statement admin fields for INSERT should end with:
 
 The WHEN MATCHED UPDATE should end with:
 {ADMIN_MERGE_UPDATE_SET}
+
+## NovaStar CDL Table Schemas (use ONLY these column names when referencing CDL tables):
+
+cdl_fact_demand_forecast: KEY_PRODUCT, KEY_COMPANY, KEY_SELLING_METHOD, FORECAST_ID, AS_OF_DATE, FORECAST_DATE, COMPANY_CODE, SELLING_METHOD_CODE, TOY_NO, DASH_CODE, DEMAND_PLAN_QTY, DEMAND_PLAN_DRAFT_QTY, LINE_OF_BUSINESS_CODE, CURRENCY_CODE, RAW_LOAD_DATE, CDL_LOAD_DATE
+cdl_fact_sales_forecast: KEY_PRODUCT, KEY_COMPANY, KEY_SELLING_METHOD, FORECAST_ID, AS_OF_DATE, FORECAST_DATE, COMPANY_CODE, SELLING_METHOD_CODE, TOY_NO, DASH_CODE, SALES_FORECAST_QTY, SALES_FORECAST_STAGED_QTY, CURRENCY_CODE, RAW_LOAD_DATE, CDL_LOAD_DATE
+cdl_fact_sales: KEY_PRODUCT, KEY_COMPANY, KEY_CUSTOMER, KEY_SELLING_METHOD, KEY_CALENDAR, ORDER_ID, ORDER_LINE_NO, TRANSACTION_DATE, COMPANY_CODE, SELLING_METHOD_CODE, CUSTOMER_CODE, TOY_NO, DASH_CODE, ORDER_STATUS, ORDER_TYPE, ORDER_QTY, LIST_PRICE, SELLING_PRICE, DISCOUNT_PCT, ORDER_VALUE, ORDER_LIST_VALUE, CURRENCY_CODE, RAW_LOAD_DATE, CDL_LOAD_DATE
+cdl_fact_returns: KEY_PRODUCT, KEY_COMPANY, KEY_CUSTOMER, KEY_SELLING_METHOD, RETURN_ID, RETURN_LINE_NO, RETURN_DATE, COMPANY_CODE, SELLING_METHOD_CODE, CUSTOMER_CODE, TOY_NO, DASH_CODE, RETURN_REASON, RETURN_QTY, RETURN_VALUE, CURRENCY_CODE, RAW_LOAD_DATE, CDL_LOAD_DATE
+cdl_fact_product_price: KEY_PRODUCT, TOY_NO, DASH_CODE, PRICE_TYPE, PRICE, CURRENCY_CODE, EFFECTIVE_DATE, EXPIRY_DATE, RAW_LOAD_DATE, CDL_LOAD_DATE
+cdl_fact_product_cost: KEY_PRODUCT, TOY_NO, DASH_CODE, COST_TYPE, COST, CURRENCY_CODE, EFFECTIVE_DATE, EXPIRY_DATE, RAW_LOAD_DATE, CDL_LOAD_DATE
+cdl_dim_product: KEY_PRODUCT, TOY_NO, DASH_CODE, PRODUCT_NAME, CATEGORY, BRAND, PRODUCT_LINE, PRODUCT_STATUS, RAW_LOAD_DATE, CDL_LOAD_DATE
+cdl_dim_company: KEY_COMPANY, COMPANY_CODE, COMPANY_NAME, REGION, COUNTRY, CURRENCY_CODE, RAW_LOAD_DATE, CDL_LOAD_DATE
+cdl_dim_customer: KEY_CUSTOMER, CUSTOMER_CODE, CUSTOMER_NAME, CUSTOMER_TYPE, REGION, COUNTRY, RAW_LOAD_DATE, CDL_LOAD_DATE
+cdl_dim_selling_method: KEY_SELLING_METHOD, SELLING_METHOD_CODE, SELLING_METHOD_NAME, CHANNEL_TYPE, RAW_LOAD_DATE, CDL_LOAD_DATE
+cdl_dim_calendar: KEY_CALENDAR, CALENDAR_DATE, YEAR, QUARTER, MONTH, WEEK, DAY_OF_WEEK, DAY_NAME, IS_WEEKEND, IS_HOLIDAY
+
+## CRITICAL column name rules:
+- CDL tables use `CDL_LOAD_DATE` as their load timestamp column. NEVER use `LOAD_DATE` or `LAST_MODIFY_DATE` — those columns do NOT exist in CDL tables.
+- For deduplication ROW_NUMBER(), use: ORDER BY CDL_LOAD_DATE DESC (not LAST_MODIFY_DATE).
+- For get_max_date in CDL-to-BL, use: MAX(CDL_LOAD_DATE).
+
+## CRITICAL SQL correctness rules:
+- Every non-aggregated column in a SELECT that uses GROUP BY MUST appear in the GROUP BY clause. No exceptions.
+- When using aggregate functions (SUM, MAX, COUNT, etc.), ALL other columns in the SELECT must be in GROUP BY.
+
+## CRITICAL Jinja2 source table format:
+- CDL source tables MUST use: `{{{{ source_projects[0] }}}}.CDL_NovaStar.<table_name>` — for example `{{{{ source_projects[0] }}}}.CDL_NovaStar.cdl_fact_sales`
+- NEVER use patterns like `{{{{ source_projects[0] }}}}.GBQ Project.Dataset.table` or any other placeholder dataset names.
+- Dimension/lookup tables in BL use: `{{{{ source_projects[2] }}}}.Business_Logic.<table_name>`
 
 Output ONLY valid YAML content. Use `|` for multiline SQL blocks. No markdown fences."""
 
@@ -254,13 +282,13 @@ IMPORTANT: This is a BL to BL table that requires full refresh logic.
 IMPORTANT: This is a CDL to BL table using incremental MERGE.
 - stage_name in metadata should be "CDL to BL"
 - Use `merge_statement` (MERGE INTO ... USING ... WHEN MATCHED/NOT MATCHED)
-- Primary CDL source table: `{{{{ source_projects[0] }}}}.{tm.source_dataset or 'Demands'}.{cdl_source}`
-  (source_projects[0] = data-discovery project for CDL tables)
+- Primary CDL source table: `{{{{ source_projects[0] }}}}.CDL_NovaStar.{cdl_source}`
+  (source_projects[0] = data-discovery project for CDL tables, dataset is ALWAYS CDL_NovaStar)
 - Dimension/lookup JOIN tables use `{{{{ source_projects[2] }}}}.Business_Logic.<table_name>`
   (source_projects[2] = BL project for dimension tables)
 - JOIN tables for enrichment: {join_table_list}
-- get_max_date should use MAX(LOAD_DATE) — the source data's load timestamp, NOT ADMIN_LOAD_DATE
-- source_table_names in metadata should be fully qualified: e.g., "data-discovery-mattel.Demands.{cdl_source}, s-mart-mattel.Business_Logic.{join_tables[0] if join_tables else ''}"
+- get_max_date should use MAX(CDL_LOAD_DATE) — the CDL layer's load timestamp, NOT LOAD_DATE or ADMIN_LOAD_DATE
+- source_table_names in metadata should be fully qualified: e.g., "{{{{ source_projects[0] }}}}.CDL_NovaStar.{cdl_source}"
 """
 
         # Build explicit transform instructions
@@ -322,7 +350,7 @@ Join Logic: {join_logic or 'Single source table or derive from field references'
 ## SQL Structure Requirements:
 - PARTITION BY must be: TIMESTAMP_TRUNC(ADMIN_LOAD_DATE, MONTH)
 - CLUSTER BY must include: {', '.join(cluster_columns) if cluster_columns else 'key columns'}
-- Include a deduplication CTE using ROW_NUMBER() OVER (PARTITION BY composite_key ORDER BY LAST_MODIFY_DATE DESC) and filter WHERE RN = 1
+- Include a deduplication CTE using ROW_NUMBER() OVER (PARTITION BY composite_key ORDER BY CDL_LOAD_DATE DESC) and filter WHERE RN = 1
 - Use SELECT DISTINCT in the base CTE
 - ADMIN_ISERROR should check for NULL only on: {', '.join(key_columns[:3]) if key_columns else 'primary key columns'}
 - ADMIN_SOURCE_SYSTEM should be '{requirements.source_name} DP' or as specified in requirements
@@ -359,7 +387,7 @@ Generate the complete YAML with metadata, create_table, get_max_date, and {'othe
         is_bl_to_bl = classification["is_bl_to_bl"]
 
         stage_name = "BL to BL" if is_bl_to_bl else "CDL to BL"
-        max_date_col = "ADMIN_LOAD_DATE" if is_bl_to_bl else "LOAD_DATE"
+        max_date_col = "ADMIN_LOAD_DATE" if is_bl_to_bl else "CDL_LOAD_DATE"
         source_project = "source_projects[2]" if is_bl_to_bl else "source_projects[0]"
         source_tables = f"{tm.source_dataset}.{tm.source_table}"
 
