@@ -106,22 +106,27 @@ async def execute_bl(
 
     # Replace Jinja2 placeholders and common LLM-generated placeholder text
     def replace_placeholders(sql: str) -> str:
+        import re
         project = client.project
+        esc_project = re.escape(project)
+
+        # Replace Jinja2 template vars
         sql = sql.replace("{{ target_project }}", project)
         sql = sql.replace("{{ source_projects[0] }}", project)
         sql = sql.replace("{{ source_projects[1] }}", project)
         sql = sql.replace("{{ source_projects[2] }}", project)
         sql = sql.replace("{{ process_id }}", "web-ui-exec")
-        # Fix common LLM-generated placeholder patterns from CSV header descriptions
-        # e.g. `GBQ Project.Dataset.table` → `actual-project.Business_Logic.table`
-        import re
-        sql = re.sub(r'`GBQ Project\.Dataset\.', f'`{project}.{dataset_name}.', sql, flags=re.IGNORECASE)
-        sql = re.sub(r'`GBQ Project\.', f'`{project}.', sql, flags=re.IGNORECASE)
-        # Also handle unbackticked references
-        sql = re.sub(r'GBQ Project\.Dataset\.', f'{project}.{dataset_name}.', sql, flags=re.IGNORECASE)
-        sql = re.sub(r'GBQ Project\.', f'{project}.', sql, flags=re.IGNORECASE)
-        # Fix dataset placeholder: `project.Dataset.table` → `project.Business_Logic.table`
-        sql = re.sub(rf'`{re.escape(project)}\.Dataset\.', f'`{project}.{dataset_name}.', sql)
+
+        # Fix LLM placeholder "GBQ Project" → actual project
+        sql = re.sub(r'GBQ Project', project, sql, flags=re.IGNORECASE)
+
+        # Fix generic "Dataset" placeholder used as dataset name
+        # Match `project.Dataset.table` but not `project.Business_Logic.table`
+        sql = re.sub(rf'({esc_project})\.Dataset\.', rf'\1.{dataset_name}.', sql)
+
+        # Fix doubled project name: `project.project.dataset.table` → `project.dataset.table`
+        sql = re.sub(rf'({esc_project})\.{esc_project}\.', rf'\1.', sql)
+
         return sql
 
     # Step 1: Execute CREATE TABLE
