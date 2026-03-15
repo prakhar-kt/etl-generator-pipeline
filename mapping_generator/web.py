@@ -148,10 +148,25 @@ async def execute_bl(
 
         return sql
 
+    def cleanup_sql(sql: str) -> str:
+        """Fix common LLM-generated SQL issues before execution."""
+        import re
+        # Remove AS aliases inside VALUES() — BQ MERGE INSERT doesn't allow them
+        # e.g. '{{ process_id }}' AS ADMIN_PROCESS_ID → '{{ process_id }}'
+        # Match: VALUES ( ... <expr> AS <identifier>, ... )
+        # Find the VALUES clause and strip AS aliases within it
+        def strip_values_aliases(m):
+            body = m.group(1)
+            # Remove AS <identifier> patterns (but not inside subqueries)
+            cleaned = re.sub(r'\s+AS\s+[A-Za-z_][A-Za-z0-9_]*', '', body)
+            return f'VALUES ({cleaned})'
+        sql = re.sub(r'VALUES\s*\(((?:[^()]*|\([^()]*\))*)\)', strip_values_aliases, sql, flags=re.IGNORECASE | re.DOTALL)
+        return sql
+
     # Step 1: Execute CREATE TABLE
     create_sql = mapping.get("create_table", "")
     if create_sql:
-        create_sql = replace_placeholders(create_sql)
+        create_sql = cleanup_sql(replace_placeholders(create_sql))
         try:
             job = client.query(create_sql)
             job.result()
@@ -163,7 +178,7 @@ async def execute_bl(
     # Step 2: Execute MERGE or other_statement
     merge_sql = mapping.get("merge_statement", "") or mapping.get("other_statement", "")
     if merge_sql:
-        merge_sql = replace_placeholders(merge_sql)
+        merge_sql = cleanup_sql(replace_placeholders(merge_sql))
 
         # Replace get_max_date inline if referenced
         max_date_sql = mapping.get("get_max_date", "")
