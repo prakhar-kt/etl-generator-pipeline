@@ -128,13 +128,16 @@ The YAML file must have these exact top-level keys:
 - ADMIN_SOURCE_SYSTEM should use the source name provided in requirements
 - Do NOT invent or hallucinate tables, JOINs, or CTEs not described in the requirements
 - Only include columns and JOINs that are explicitly in the field mappings or business rules
-- CRITICAL: NO column in the final SELECT should EVER be NULL. After any FULL OUTER JOIN or LEFT JOIN, wrap ALL columns with COALESCE:
-  - INT64 columns: COALESCE(col, 0)
-  - NUMERIC columns: COALESCE(col, CAST(0 AS NUMERIC))
-  - STRING columns: COALESCE(col, 'N/A')
-  - DATE columns: COALESCE(col, DATE('1900-01-01'))
-  - TIMESTAMP columns: COALESCE(col, TIMESTAMP('1900-01-01'))
-  - BOOL columns: COALESCE(col, FALSE)
+- CRITICAL: NO column in the final SELECT should EVER be NULL. Two strategies:
+  1. PREFERRED: Use the table that defines the primary grain as the LEFT table in JOINs.
+     For example, in "demand vs sales", the forecast tables define the grain (AS_OF_DATE, FORECAST_DATE),
+     so JOIN sales TO forecasts (not the other way). This naturally avoids NULLs in grain columns.
+     Add WHERE clauses to filter out rows where essential grain columns would be NULL.
+  2. FALLBACK: If FULL OUTER JOIN is needed, wrap ALL nullable columns with COALESCE:
+     INT64: COALESCE(col, 0), NUMERIC: COALESCE(col, CAST(0 AS NUMERIC)),
+     STRING: COALESCE(col, 'N/A'), DATE: COALESCE(col, DATE('1900-01-01')),
+     TIMESTAMP: COALESCE(col, TIMESTAMP('1900-01-01')), BOOL: COALESCE(col, FALSE)
+  Always add a final WHERE clause to exclude rows where key grain columns are NULL.
 
 The merge_statement admin fields for INSERT should end with:
 {ADMIN_MERGE_INSERT_VALUES}
