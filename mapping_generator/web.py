@@ -202,6 +202,11 @@ async def execute_bl(
     merge_sql = mapping.get("merge_statement", "") or mapping.get("other_statement", "")
     if merge_sql:
         merge_sql = cleanup_sql(replace_placeholders(merge_sql))
+        # Strip any stray SQL before the MERGE/DELETE/INSERT keyword
+        import re as _re2
+        m = _re2.search(r'(?:^|\n)\s*(MERGE\s+INTO|DELETE\s+FROM|INSERT\s+INTO)', merge_sql, _re2.IGNORECASE)
+        if m:
+            merge_sql = merge_sql[m.start(1):]
 
         # Replace get_max_date inline if referenced
         max_date_sql = mapping.get("get_max_date", "")
