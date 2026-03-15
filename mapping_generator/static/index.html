@@ -131,7 +131,6 @@
         <h2>Generated Files</h2>
         <div style="display:flex; gap:0.5rem; align-items:center;">
           <span id="bqStatus" class="bq-status"></span>
-          <button class="btn btn-execute" id="executeAllBtn" style="display:none;">Execute on BigQuery</button>
           <button class="btn btn-download" id="downloadAllBtn">Download All</button>
         </div>
       </div>
@@ -216,9 +215,6 @@
       const list = document.getElementById('fileList');
       list.innerHTML = '';
       const isBL = files.some(f => f.content && (f.content.includes('merge_statement:') || f.content.includes('create_table:')));
-      const execAllBtn = document.getElementById('executeAllBtn');
-      execAllBtn.style.display = (isBL && bqAvailable) ? 'inline-flex' : 'none';
-
       files.forEach((file, i) => {
         const div = document.createElement('div');
         div.className = 'result-file';
@@ -232,16 +228,12 @@
         const pipelineBtn = (isBL && bqAvailable)
           ? `<button class="btn btn-pipeline" onclick="executePipeline(${i})" id="pipelineBtn${i}">Run Pipeline</button>`
           : '';
-        const execBtn = (isBL && bqAvailable)
-          ? `<button class="btn btn-execute" onclick="executeFile(${i})" id="execBtn${i}">Execute</button>`
-          : '';
 
         div.innerHTML = `
           <div class="result-file-header">
             <h3>${file.filename}</h3>
             <div style="display:flex;gap:0.5rem;">
               ${pipelineBtn}
-              ${execBtn}
               <button class="btn btn-edit" onclick="toggleEdit(${i})" id="editBtn${i}">Edit</button>
               <button class="btn btn-download" onclick="downloadFile(${i})">Download</button>
             </div>
@@ -503,56 +495,7 @@
       }
     }
 
-    // ---------- Simple Execute (legacy) ----------
-
-    async function executeFile(index) {
-      const file = generatedFiles[index];
-      const btn = document.getElementById('execBtn' + index);
-      const resultsDiv = document.getElementById('execResults' + index);
-      btn.disabled = true;
-      btn.textContent = 'Executing...';
-      resultsDiv.innerHTML = '';
-
-      try {
-        const formData = new FormData();
-        formData.append('yaml_content', file.content);
-        formData.append('project_id', bqProject);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 600000);
-        const resp = await fetch('/execute-bl', { method: 'POST', body: formData, signal: controller.signal });
-        clearTimeout(timeoutId);
-        const text = await resp.text();
-        let data;
-        try { data = JSON.parse(text); } catch { resultsDiv.innerHTML = '<div class="error-box" style="font-size:0.8rem;">Server error: ' + escapeHtml(text.slice(0, 300)) + '</div>'; return; }
-
-        if (data.errors && data.errors.length > 0) {
-          resultsDiv.innerHTML = '<div class="error-box" style="font-size:0.8rem;">' + data.errors.join('<br>') + '</div>';
-        }
-        if (data.results) {
-          let html = '';
-          data.results.forEach(r => {
-            const dotClass = r.status === 'success' ? 'success' : 'error';
-            html += `<div class="exec-step"><span class="dot ${dotClass}"></span><strong>${r.step}:</strong> ${escapeHtml(r.message)}</div>`;
-          });
-          resultsDiv.innerHTML += html;
-        }
-        if (data.results && data.results.every(r => r.status === 'success')) {
-          resultsDiv.innerHTML = '<div class="success-box">Successfully executed against BigQuery</div>' + resultsDiv.innerHTML;
-        }
-      } catch (err) {
-        let msg = err.message;
-        if (err.name === 'AbortError') msg = 'Request timed out (10 min).';
-        if (msg === 'Failed to fetch') msg = 'Failed to fetch - check http:// access and server reachability.';
-        resultsDiv.innerHTML = '<div class="error-box" style="font-size:0.8rem;">Execution failed: ' + msg + '</div>';
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Execute';
-      }
-    }
-
-    document.getElementById('executeAllBtn').addEventListener('click', async () => {
-      for (let i = 0; i < generatedFiles.length; i++) await executeFile(i);
-    });
+    // Legacy execute removed — all execution goes through Run Pipeline
 
     function toggleEdit(index) {
       const file = generatedFiles[index];
