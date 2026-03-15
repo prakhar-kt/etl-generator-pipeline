@@ -128,6 +128,13 @@ The YAML file must have these exact top-level keys:
 - ADMIN_SOURCE_SYSTEM should use the source name provided in requirements
 - Do NOT invent or hallucinate tables, JOINs, or CTEs not described in the requirements
 - Only include columns and JOINs that are explicitly in the field mappings or business rules
+- CRITICAL: NO column in the final SELECT should EVER be NULL. After any FULL OUTER JOIN or LEFT JOIN, wrap ALL columns with COALESCE:
+  - INT64 columns: COALESCE(col, 0)
+  - NUMERIC columns: COALESCE(col, CAST(0 AS NUMERIC))
+  - STRING columns: COALESCE(col, 'N/A')
+  - DATE columns: COALESCE(col, DATE('1900-01-01'))
+  - TIMESTAMP columns: COALESCE(col, TIMESTAMP('1900-01-01'))
+  - BOOL columns: COALESCE(col, FALSE)
 
 The merge_statement admin fields for INSERT should end with:
 {ADMIN_MERGE_INSERT_VALUES}

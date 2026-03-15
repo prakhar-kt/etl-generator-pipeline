@@ -114,6 +114,10 @@ BASELINE_LESSONS = [
         "error_pattern": "must be qualified with a dataset.*src",
         "rule": "Do NOT create a STRUCT alias named 'src'. Do NOT use `src` as a table alias or reference. For ADMIN_ROW_HASH, use 0 instead of FARM_FINGERPRINT(TO_JSON_STRING(src)).",
     },
+    {
+        "error_pattern": "NULL.*FULL OUTER JOIN|NULLs found",
+        "rule": "When using FULL OUTER JOIN to combine fact tables, ALWAYS wrap ALL columns with COALESCE to prevent NULLs: COALESCE(col, 0) for INT64/NUMERIC, COALESCE(col, 'N/A') for STRING, COALESCE(col, DATE('1900-01-01')) for DATE, COALESCE(col, TIMESTAMP('1900-01-01')) for TIMESTAMP. No column in the final output should ever be NULL.",
+    },
 ]
 
 
