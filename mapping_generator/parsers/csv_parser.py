@@ -227,14 +227,28 @@ class CSVParser:
         tgt_tbl = ""
         source_dataset = ""
 
+        # Description-row values to skip (row 3 in multi-header CSVs)
+        _SKIP_VALUES = {
+            "field description", "field name", "id", "field type",
+            "table name", "dataset name", "project id", "gbq project",
+            "transformation logic", "default if null", "business area",
+            "classification", "pii flag", "notes",
+        }
+
         for _, row in df.iterrows():
             tgt_col = str(row.get(tgt_col_name, "")).strip()
             if not tgt_col or tgt_col.lower() == "nan":
+                continue
+            # Skip description/header rows
+            if tgt_col.lower() in _SKIP_VALUES:
                 continue
 
             dtype = str(row.get(type_col_name, "STRING")).strip().upper()
             if not dtype or dtype == "NAN":
                 dtype = "STRING"
+            # Skip rows where type looks like a description, not a BQ type
+            if dtype.lower() in ("field type", "field_type"):
+                continue
 
             # Infer is_key from KEY_ prefix
             is_key = tgt_col.startswith("KEY_")
