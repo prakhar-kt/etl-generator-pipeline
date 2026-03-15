@@ -156,6 +156,10 @@ async def execute_bl(
         sql = re.sub(r'\bLAST_MODIFY_DATE\b', 'CDL_LOAD_DATE', sql)
         sql = re.sub(r'\bLOAD_DATE\b', 'CDL_LOAD_DATE', sql)
 
+        # Fix undefined `src` struct reference — use SOURCE alias instead
+        sql = sql.replace('TO_JSON_STRING(src))', 'TO_JSON_STRING(SOURCE))')
+        sql = sql.replace('TO_JSON_STRING(SOURCE.src))', 'TO_JSON_STRING(SOURCE))')
+
         return sql
 
     def cleanup_sql(sql: str) -> str:
