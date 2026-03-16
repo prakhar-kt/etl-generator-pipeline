@@ -154,7 +154,13 @@ def fix_type_mismatches(merge_sql: str, create_sql: str) -> str:
 
 
 def prepare_merge_sql(sql: str) -> str:
-    """Strip any stray SQL before the MERGE/DELETE/INSERT keyword."""
+    """Strip any stray SQL before the main statement, preserving WITH clauses."""
+    # Look for WITH ... MERGE/DELETE/INSERT pattern first (CTEs)
+    m = re.search(r'(?:^|\n)\s*(WITH\s+)', sql, re.IGNORECASE)
+    if m:
+        sql = sql[m.start(1):]
+        return sql
+    # No WITH clause — strip to MERGE/DELETE/INSERT
     m = re.search(r'(?:^|\n)\s*(MERGE\s+INTO|DELETE\s+FROM|INSERT\s+INTO)', sql, re.IGNORECASE)
     if m:
         sql = sql[m.start(1):]
