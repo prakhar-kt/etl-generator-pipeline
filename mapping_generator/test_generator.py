@@ -115,19 +115,19 @@ LIMIT 5""",
             "_columns": columns,
         })
 
-    # 5. Source coverage
+    # 5. Source coverage — compare only the primary (first) source table
     source_tables = _extract_source_tables(mapping, project)
     if source_tables:
-        for src_fq, src_name in source_tables[:2]:
-            tests.append({
-                "name": f"source_coverage_{src_name}",
-                "description": f"Check row coverage from {src_name}",
-                "sql": f"""SELECT
+        src_fq, src_name = source_tables[0]
+        tests.append({
+            "name": f"source_coverage_{src_name}",
+            "description": f"Check row coverage from {src_name}",
+            "sql": f"""SELECT
   (SELECT COUNT(*) FROM {src_fq}) as source_rows,
   (SELECT COUNT(*) FROM {fq_table}) as target_rows""",
-                "expected": "informational",
-                "severity": "warning",
-            })
+            "expected": "informational",
+            "severity": "warning",
+        })
 
     return tests
 
