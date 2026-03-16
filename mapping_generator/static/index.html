@@ -180,7 +180,6 @@ document.getElementById('genForm').addEventListener('submit', async (e) => {
     const text = await (await fetch('/generate', { method: 'POST', body: formData })).text();
     let data; try { data = JSON.parse(text); } catch { showMsg('Server error: ' + text.slice(0, 200), 'error'); return; }
     if (data.errors && data.errors.length) { showMsg(data.errors.join('<br>'), 'error'); return; }
-    if (data.from_cache) showMsg('YAML loaded from storage (previously generated). Click Run Pipeline to execute.', 'info');
     generatedFiles = data.files;
     renderFiles(data.files);
   } catch (err) { showMsg('Request failed: ' + err.message, 'error'); }
