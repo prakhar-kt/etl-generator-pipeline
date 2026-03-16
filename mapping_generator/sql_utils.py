@@ -46,8 +46,15 @@ def replace_placeholders(sql: str, project: str, dataset_name: str = "Business_L
     # Fix ADMIN_ROW_HASH: TO_JSON_STRING(src/SOURCE) doesn't work in BQ MERGE
     sql = re.sub(r'FARM_FINGERPRINT\(TO_JSON_STRING\([^)]*\)\)', '0', sql)
 
+    # Fix MERGE USING <bare_cte_name> — BQ requires a subquery, not a bare CTE reference
+    # USING some_cte AS SOURCE → USING (SELECT * FROM some_cte) AS SOURCE
+    sql = re.sub(
+        r'USING\s+([a-zA-Z_]\w*)\s+AS\s+SOURCE\b',
+        r'USING (SELECT * FROM \1) AS SOURCE',
+        sql, flags=re.IGNORECASE
+    )
+
     # Fix reserved words used as CTE/alias names — BQ treats them as table refs
-    # Common offenders: src, final, source, target, data, result
     reserved_aliases = {
         'src': 'src_cte',
         'final': 'final_cte',
