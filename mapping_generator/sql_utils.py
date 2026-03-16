@@ -155,15 +155,23 @@ def fix_type_mismatches(merge_sql: str, create_sql: str) -> str:
 
 def prepare_merge_sql(sql: str) -> str:
     """Strip any stray SQL before the main statement, preserving WITH clauses."""
-    # Look for WITH ... MERGE/DELETE/INSERT pattern first (CTEs)
-    m = re.search(r'(?:^|\n)\s*(WITH\s+)', sql, re.IGNORECASE)
-    if m:
-        sql = sql[m.start(1):]
-        return sql
-    # No WITH clause — strip to MERGE/DELETE/INSERT
-    m = re.search(r'(?:^|\n)\s*(MERGE\s+INTO|DELETE\s+FROM|INSERT\s+INTO)', sql, re.IGNORECASE)
-    if m:
-        sql = sql[m.start(1):]
+    # Look for the main statement: WITH (top-level CTEs) or MERGE/DELETE/INSERT
+    # Check for top-level WITH first (must appear before MERGE, not inside USING)
+    m_with = re.search(r'(?:^|\n)\s*(WITH\s+)', sql, re.IGNORECASE)
+    m_merge = re.search(r'(?:^|\n)\s*(MERGE\s+INTO|DELETE\s+FROM|INSERT\s+INTO)', sql, re.IGNORECASE)
+
+    if m_with and m_merge:
+        # If WITH appears before MERGE, it's a top-level CTE — keep from WITH
+        if m_with.start() < m_merge.start():
+            sql = sql[m_with.start(1):]
+        else:
+            # WITH is inside the MERGE (e.g. inside USING subquery) — keep from MERGE
+            sql = sql[m_merge.start(1):]
+    elif m_merge:
+        sql = sql[m_merge.start(1):]
+    elif m_with:
+        sql = sql[m_with.start(1):]
+
     return sql
 
 
