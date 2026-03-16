@@ -119,8 +119,8 @@ BASELINE_LESSONS = [
         "rule": "Tables named bl_dim_* do NOT exist. Dimension tables are in CDL_NovaStar with prefix cdl_dim_: cdl_dim_company, cdl_dim_product, cdl_dim_customer, cdl_dim_selling_method, cdl_dim_calendar. Always use cdl_dim_ prefix, never bl_dim_.",
     },
     {
-        "error_pattern": "must be qualified with a dataset.*USING",
-        "rule": "In MERGE statements, USING must reference a subquery, not a bare CTE name. Use USING (SELECT * FROM cte_name) AS SOURCE, never USING cte_name AS SOURCE.",
+        "error_pattern": "Unexpected keyword MERGE|must be qualified with a dataset.*USING",
+        "rule": "BigQuery does NOT support WITH ... MERGE (top-level CTEs before MERGE). CTEs must be INSIDE the USING subquery: MERGE INTO target USING (WITH cte AS (...) SELECT * FROM cte) AS SOURCE. Never put WITH before MERGE.",
     },
     {
         "error_pattern": "NULL.*FULL OUTER JOIN|NULLs found",

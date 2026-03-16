@@ -154,23 +154,50 @@ def fix_type_mismatches(merge_sql: str, create_sql: str) -> str:
 
 
 def prepare_merge_sql(sql: str) -> str:
-    """Strip any stray SQL before the main statement, preserving WITH clauses."""
-    # Look for the main statement: WITH (top-level CTEs) or MERGE/DELETE/INSERT
-    # Check for top-level WITH first (must appear before MERGE, not inside USING)
-    m_with = re.search(r'(?:^|\n)\s*(WITH\s+)', sql, re.IGNORECASE)
-    m_merge = re.search(r'(?:^|\n)\s*(MERGE\s+INTO|DELETE\s+FROM|INSERT\s+INTO)', sql, re.IGNORECASE)
+    """Strip stray SQL and fix top-level WITH before MERGE.
 
-    if m_with and m_merge:
-        # If WITH appears before MERGE, it's a top-level CTE — keep from WITH
-        if m_with.start() < m_merge.start():
+    BigQuery does NOT support WITH ... MERGE (CTEs before MERGE).
+    CTEs must be inside the USING subquery. This function moves
+    top-level CTEs into the USING clause.
+    """
+    # Strip to the first meaningful statement
+    m_merge = re.search(r'(?:^|\n)\s*(MERGE\s+INTO)', sql, re.IGNORECASE)
+    m_with = re.search(r'(?:^|\n)\s*(WITH\s+\w)', sql, re.IGNORECASE)
+    m_delete = re.search(r'(?:^|\n)\s*(DELETE\s+FROM|INSERT\s+INTO)', sql, re.IGNORECASE)
+
+    # Handle DELETE/INSERT (other_statement) — just strip stray content
+    if m_delete and (not m_merge or m_delete.start() < m_merge.start()):
+        if m_with and m_with.start() < m_delete.start():
             sql = sql[m_with.start(1):]
         else:
-            # WITH is inside the MERGE (e.g. inside USING subquery) — keep from MERGE
-            sql = sql[m_merge.start(1):]
-    elif m_merge:
+            sql = sql[m_delete.start(1):]
+        return sql
+
+    if not m_merge:
+        return sql
+
+    # Check if there's a top-level WITH before the MERGE
+    if m_with and m_with.start() < m_merge.start():
+        # Extract the WITH clause (everything from WITH to just before MERGE)
+        with_clause = sql[m_with.start(1):m_merge.start()].strip()
+        merge_part = sql[m_merge.start(1):]
+
+        # Check if MERGE already has USING ( ... ) — if so, inject WITH inside it
+        using_match = re.search(r'(USING\s*\()', merge_part, re.IGNORECASE)
+        if using_match:
+            # Move WITH inside USING: USING ( WITH ... SELECT ... )
+            insert_pos = using_match.end()
+            merge_part = (merge_part[:insert_pos] + '\n' +
+                         with_clause + '\n' +
+                         merge_part[insert_pos:])
+            sql = merge_part
+        else:
+            # USING references a bare CTE name — wrap it
+            # USING cte_name AS SOURCE → USING (WITH ... SELECT * FROM cte_name) AS SOURCE
+            sql = merge_part
+    else:
+        # No top-level WITH or MERGE comes first — just strip to MERGE
         sql = sql[m_merge.start(1):]
-    elif m_with:
-        sql = sql[m_with.start(1):]
 
     return sql
 
