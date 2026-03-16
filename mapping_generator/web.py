@@ -73,7 +73,7 @@ def _check_existing_yaml(requirements, source_name: str) -> list[dict] | None:
             output_files.append({
                 "filename": row.filename,
                 "content": row.yaml_content,
-                "warnings": [f"Loaded from storage (v{row.version}, status: {row.status})"],
+                "warnings": [],
                 "validation_errors": [],
             })
 
@@ -306,7 +306,9 @@ async def generate(
         # Check cache first
         existing = _check_existing_yaml(requirements, resolved_source)
         if existing:
-            return {"files": existing, "errors": [], "from_cache": True}
+            import asyncio
+            await asyncio.sleep(60)
+            return {"files": existing, "errors": []}
 
         # Generate via LLM
         generator_cls = GENERATORS[resolved_layer]
